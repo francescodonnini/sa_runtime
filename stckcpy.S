@@ -13,7 +13,7 @@ dev_name: .asciz "/dev/shadowstack"
 relocate_stack:
     mov     %rdx,       %r12 # save dl_fini
 
-    mov    $__NR_MMAP,  %rax
+    mov    $__NR_mmap,  %rax
     movabs $ADR_HINT,   %rdi
     mov    $STACK_SIZE, %rsi
     mov    $3,          %rdx # PROT_READ | PROT_WRITE
@@ -192,7 +192,7 @@ _patch_auxv_exit:
     mov %rax, %rsp # %rax = new stack area
     mov %rax, %r14 # %r14 = new stack area (scratch variable)
 
-    mov $__NR_OPEN, %rax
+    mov $__NR_open, %rax
     lea dev_name(%rip), %rdi
     mov $2, %rsi # O_RDWR
     xor %rdx, %rdx
@@ -210,7 +210,7 @@ _patch_auxv_exit:
     movq  $0,    _IOCTL_PIVOT_DELTA(%rsp)
     mov   %rsp,  %rdx
 
-    mov    $__NR_IOCTL, %rax
+    mov    $__NR_ioctl, %rax
     mov    %r13, %rdi
     movabs $IOCTL_SHADOW_PIVOT, %rsi
     syscall
@@ -224,7 +224,7 @@ _patch_auxv_exit:
     mov __ss_shadow_offset@GOTPCREL(%rip), %rdi # mprotect's addr
     mov %rax, (%rdi)
 
-    mov $__NR_MPROTECT, %rax
+    mov $__NR_mprotect, %rax
     mov $4096, %rsi # mprotect's size
     mov $1, %rdx    # mprotect's prot (PROT_READ = 1)
     syscall
@@ -233,7 +233,7 @@ _patch_auxv_exit:
 
     add $_IOCTL_PIVOT_FRAME, %rsp
 
-    mov $__NR_CLOSE, %rax
+    mov $__NR_close, %rax
     mov %r13, %rdi # close's fd
     syscall
 
@@ -241,11 +241,11 @@ _patch_auxv_exit:
     jmp _start
 
 _out2:
-    mov $__NR_EXIT, %rax
+    mov $__NR_exit, %rax
     mov %r13, %rdi
     syscall
 
 _out:
-    mov $__NR_EXIT, %rax
+    mov $__NR_exit, %rax
     mov $1,  %rdi
     syscall
