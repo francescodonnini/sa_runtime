@@ -76,7 +76,7 @@ int main(void) {
     puts("");
 
     puts("/* struct ioctl_pivot_params */");
-    LAYOUT("PIVOT", ioctl_pivot_params);
+    LAYOUT("_IOCTL_PIVOT", ioctl_pivot_params);
     OFF("_IOCTL_PIVOT", ioctl_pivot_params, error, "ERROR");
     OFF("_IOCTL_PIVOT", ioctl_pivot_params, new_stack_address, "NEW_STACK");
     OFF("_IOCTL_PIVOT", ioctl_pivot_params, rsp, "RSP");
