@@ -49,7 +49,7 @@ static __attribute__((constructor)) void main_thread_init(void) {
         exit(EXIT_FAILURE);
     }
 
-    shadow_fd = open("/dev/shadowstack", O_RDWR | O_CLOEXEC);
+    shadow_fd = open("/dev/shdwstck", O_RDWR | O_CLOEXEC);
     if (shadow_fd < 0) {
         perror("cannot open shadowstack device");
         exit(EXIT_FAILURE);

@@ -7,7 +7,7 @@
 .extern _start
 
 .section .rodata
-dev_name: .asciz "/dev/shadowstack"
+dev_name: .asciz "/dev/shdwstck"
 
 .section .text
 relocate_stack:
