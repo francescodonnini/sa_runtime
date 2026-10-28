@@ -203,11 +203,11 @@ _patch_auxv_exit:
 
     mov %rax, %r13
 
-    sub   $PIVOT_FRAME, %rsp
-    movq  $0,    PIVOT_ERROR(%rsp)
-    mov   %r14,  PIVOT_NEW_STACK(%rsp)
-    mov   %r15,  PIVOT_RSP(%rsp)
-    movq  $0,    PIVOT_DELTA(%rsp)
+    sub   $_IOCTL_PIVOT_FRAME, %rsp
+    movq  $0,    _IOCTL_PIVOT_ERROR(%rsp)
+    mov   %r14,  _IOCTL_PIVOT_NEW_STACK(%rsp)
+    mov   %r15,  _IOCTL_PIVOT_RSP(%rsp)
+    movq  $0,    _IOCTL_PIVOT_DELTA(%rsp)
     mov   %rsp,  %rdx
 
     mov    $__NR_IOCTL, %rax
@@ -220,7 +220,7 @@ _patch_auxv_exit:
     cmpq $0, (%rsp)
     jne _out2
 
-    mov PIVOT_DELTA(%rsp), %rax
+    mov _IOCTL_PIVOT_DELTA(%rsp), %rax
     mov __ss_shadow_offset@GOTPCREL(%rip), %rdi # mprotect's addr
     mov %rax, (%rdi)
 
@@ -231,7 +231,7 @@ _patch_auxv_exit:
     test %rax, %rax
     jnz _out2
 
-    add $PIVOT_FRAME, %rsp
+    add $_IOCTL_PIVOT_FRAME, %rsp
 
     mov $__NR_CLOSE, %rax
     mov %r13, %rdi # close's fd

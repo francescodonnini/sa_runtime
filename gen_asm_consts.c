@@ -70,32 +70,32 @@ int main(void) {
     puts("");
 
     puts("/* struct ioctl_stack_params */");
-    LAYOUT("STACK", ioctl_stack_params);
-    OFF("STACK", ioctl_stack_params, error, "ERROR");
-    OFF("STACK", ioctl_stack_params, stack_base, "BASE");
+    LAYOUT("_IOCTL_STACK", ioctl_stack_params);
+    OFF("_IOCTL_STACK", ioctl_stack_params, error, "ERROR");
+    OFF("_IOCTL_STACK", ioctl_stack_params, stack_base, "BASE");
     puts("");
 
     puts("/* struct ioctl_pivot_params */");
     LAYOUT("PIVOT", ioctl_pivot_params);
-    OFF("PIVOT", ioctl_pivot_params, error, "ERROR");
-    OFF("PIVOT", ioctl_pivot_params, new_stack_address, "NEW_STACK");
-    OFF("PIVOT", ioctl_pivot_params, rsp, "RSP");
-    OFF("PIVOT", ioctl_pivot_params, delta, "DELTA");
+    OFF("_IOCTL_PIVOT", ioctl_pivot_params, error, "ERROR");
+    OFF("_IOCTL_PIVOT", ioctl_pivot_params, new_stack_address, "NEW_STACK");
+    OFF("_IOCTL_PIVOT", ioctl_pivot_params, rsp, "RSP");
+    OFF("_IOCTL_PIVOT", ioctl_pivot_params, delta, "DELTA");
     puts("");
 
     puts("/* struct ioctl_prepare_params */");
-    LAYOUT("PREPARE", ioctl_prepare_params);
-    OFF("PREPARE", ioctl_prepare_params, error, "ERROR");
-    OFF("PREPARE", ioctl_prepare_params, stack_base, "BASE");
-    OFF("PREPARE", ioctl_prepare_params, detached, "DETACHED");
+    LAYOUT("_IOCTL_PREPARE", ioctl_prepare_params);
+    OFF("_IOCTL_PREPARE", ioctl_prepare_params, error, "ERROR");
+    OFF("_IOCTL_PREPARE", ioctl_prepare_params, stack_base, "BASE");
+    OFF("_IOCTL_PREPARE", ioctl_prepare_params, detached, "DETACHED");
     puts("");
 
     puts("/* struct ioctl_reclaim_dead_params */");
-    LAYOUT("RECLAIM_DEAD", ioctl_reclaim_dead_params);
-    OFF("RECLAIM_DEAD", ioctl_reclaim_dead_params, error, "ERROR");
-    OFF("RECLAIM_DEAD", ioctl_reclaim_dead_params, bases, "BASES");
-    OFF("RECLAIM_DEAD", ioctl_reclaim_dead_params, cap, "CAP");
-    OFF("RECLAIM_DEAD", ioctl_reclaim_dead_params, count, "COUNT");
+    LAYOUT("_IOCTL_RECLAIM_DEAD", ioctl_reclaim_dead_params);
+    OFF("_IOCTL_RECLAIM_DEAD", ioctl_reclaim_dead_params, error, "ERROR");
+    OFF("_IOCTL_RECLAIM_DEAD", ioctl_reclaim_dead_params, bases, "BASES");
+    OFF("_IOCTL_RECLAIM_DEAD", ioctl_reclaim_dead_params, cap, "CAP");
+    OFF("_IOCTL_RECLAIM_DEAD", ioctl_reclaim_dead_params, count, "COUNT");
     puts("");
 
     puts("#endif");
