@@ -1,6 +1,7 @@
 .equ STACK_SIZE,         0x800000
 .equ ADR_HINT,           0x100000000000
 .equ IOCTL_SHADOW_PIVOT, 0xc018ca73
+.equ __NR_MPROTECT,      10
 .equ __NR_OPEN,          2
 .equ __NR_CLOSE,         3
 .equ __NR_MMAP,          9
@@ -24,9 +25,8 @@ relocate_stack:
     mov    $-1,         %r8
     xor    %r9,         %r9
     syscall
-
-    test   %rax, %rax
-    jz     _out
+    cmp    $-4095, %rax
+    jae    _out
 
     xor    %rdi, %rdi # M
     xor    %r11, %r11 # AT_RANDOM vec
@@ -99,7 +99,7 @@ _inc_auxv:
 _scan_auxv_exit:
     lea 16(%r8), %r8
 
-    mov %rax, %rdx # save mmap'd adr to use rax w/ scasb
+    mov %rax, %rdx # save mmap'd address to use rax w/ scasb
 
     test %r11, %r11
     jnz _at_rnd_highest
@@ -207,10 +207,11 @@ _patch_auxv_exit:
 
     mov %rax, %r13
 
-    sub  $24,     %rsp
-    movq $0,     (%rsp)
-    mov  %r14,  8(%rsp)
-    mov  %r15, 16(%rsp)
+    sub  $32,     %rsp  # struct ioctl_pivot_params
+    movq $0,     (%rsp) # error
+    mov  %r14,  8(%rsp) # new_stack_address
+    mov  %r15, 16(%rsp) # rsp
+    mov  $0,   24(%rsp) # sa_delta
     mov  %rsp,    %rdx
 
     mov    $__NR_IOCTL, %rax # __NR_ioctl
@@ -220,11 +221,24 @@ _patch_auxv_exit:
 
     test %rax, %rax
     js _out2
+    cmpq $0, (%rsp)
+    jne _out2
 
-    add $24, %rsp
+    mov 24(%rsp), %rax
+    mov __ss_shadow_offset@GOTPCREL(%rip), %rdi # mprotect's addr
+    mov %rax, (%rdi)
+
+    mov $__NR_MPROTECT, %rax
+    mov $4096, %rsi # mprotect's size
+    mov $1, %rdx    # mprotect's prot (PROT_READ = 1)
+    syscall
+    test %rax, %rax
+    jnz _out2
+
+    add $32, %rsp
 
     mov $__NR_CLOSE, %rax   # __NR_close
-    mov %r13, %rdi 
+    mov %r13, %rdi # close's fd
     syscall
 
     mov %r12, %rdx
