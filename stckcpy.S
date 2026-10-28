@@ -233,7 +233,7 @@ _patch_auxv_exit:
 
     add $PIVOT_FRAME, %rsp
 
-    mov $__NR_CLOSE, %rax   # __NR_close
+    mov $__NR_CLOSE, %rax
     mov %r13, %rdi # close's fd
     syscall
 
@@ -246,6 +246,6 @@ _out2:
     syscall
 
 _out:
-    mov $__NR_EXIT, %rax # __NR_exit
+    mov $__NR_EXIT, %rax
     mov $1,  %rdi
     syscall
