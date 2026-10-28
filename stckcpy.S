@@ -26,12 +26,12 @@ relocate_stack:
     movabs $ADR_HINT,   %rdi
     mov    $STACK_SIZE, %rsi
     mov    $3,          %rdx # PROT_READ | PROT_WRITE
-    mov    $34,         %r10 # MAP_ANONYMOUS | MAP_PRIVATE
+    mov    $0x100022,   %r10 # MAP_PRIVATE | MAP_ANONYMOUS | MAP_FIXED_NOREPLACE
     mov    $-1,         %r8
     xor    %r9,         %r9
     syscall
     cmp    $-4095, %rax
-    jae    _out
+    jae    _err_mmap
 
     xor    %rdi, %rdi # M
     xor    %r11, %r11 # AT_RANDOM vec
@@ -75,8 +75,6 @@ _scan_auxv:
     test %r9, %r9
     jz _scan_auxv_exit
 
-    cmp $7, %r9 # AT_BASE
-    je _check_auxp
     cmp $15, %r9 # AT_PLATFORM
     je _check_auxp
     cmp $25, %r9 # AT_RANDOM
@@ -177,8 +175,6 @@ _patch_auxv:
     test %r11, %r11
     jz _patch_auxv_exit # exit if AT_NULL
 
-    cmp $7, %r11 # AT_BASE
-    je _do_patch_auxp
     cmp $15, %r11 # AT_PLATFORM
     je _do_patch_auxp
     cmp $25, %r11 # AT_RANDOM
@@ -206,42 +202,36 @@ _patch_auxv_exit:
     mov $2, %rsi # O_RDWR
     xor %rdx, %rdx
     syscall
-
     test %rax, %rax
-    js   _out
-
+    js   _err_open
+    
     mov %rax, %r13
-
     sub   $_IOCTL_PIVOT_FRAME, %rsp
     movq  $0,    _IOCTL_PIVOT_ERROR(%rsp)
     mov   %r14,  _IOCTL_PIVOT_NEW_STACK(%rsp)
     mov   %r15,  _IOCTL_PIVOT_RSP(%rsp)
     movq  $0,    _IOCTL_PIVOT_DELTA(%rsp)
     mov   %rsp,  %rdx
-
     mov    $__NR_ioctl, %rax
     mov    %r13, %rdi
     movabs $IOCTL_SHADOW_PIVOT, %rsi
     syscall
-
     test %rax, %rax
-    js _out2
-    cmpq $0, (%rsp)
-    jne _out2
+    js _err_ioctl
+    cmpq $0, _IOCTL_PIVOT_ERROR(%rsp)
+    jne _err_pivot
 
     mov _IOCTL_PIVOT_DELTA(%rsp), %rax
     lea __ss_shadow_offset(%rip), %rdi # mprotect's addr
     mov %rax, (%rdi)
-
     mov $__NR_mprotect, %rax
     mov $4096, %rsi # mprotect's size
     mov $1, %rdx    # mprotect's prot (PROT_READ = 1)
     syscall
     test %rax, %rax
-    jnz _out2
+    jnz _err_mprotect
 
     add $_IOCTL_PIVOT_FRAME, %rsp
-
     mov $__NR_close, %rax
     mov %r13, %rdi # close's fd
     syscall
@@ -249,12 +239,17 @@ _patch_auxv_exit:
     mov %r12, %rdx
     jmp _start
 
-_out2:
-    mov $__NR_exit, %rax
-    mov %r13, %rdi
+_err_mmap:      mov $1, %edi
+                jmp _die
+_err_open:      mov $2, %edi
+                jmp _die
+_err_ioctl:     mov $3, %edi
+                jmp _die
+_err_pivot:     mov $4, %edi
+                jmp _die
+_err_protect:   mov $5, %edi
+_die:
+    mov $__NR_exit_group, %eax
     syscall
 
-_out:
-    mov $__NR_exit, %rax
-    mov $1,  %rdi
-    syscall
+.section .note.GNU-stack, "", @progbits
