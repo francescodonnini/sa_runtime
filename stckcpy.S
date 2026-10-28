@@ -207,12 +207,12 @@ _patch_auxv_exit:
 
     mov %rax, %r13
 
-    sub  $32,     %rsp  # struct ioctl_pivot_params
-    movq $0,     (%rsp) # error
-    mov  %r14,  8(%rsp) # new_stack_address
-    mov  %r15, 16(%rsp) # rsp
-    mov  $0,   24(%rsp) # sa_delta
-    mov  %rsp,    %rdx
+    sub   $32,     %rsp  # struct ioctl_pivot_params
+    movq  $0,     (%rsp) # error
+    mov   %r14,  8(%rsp) # new_stack_address
+    mov   %r15, 16(%rsp) # rsp
+    movq  $0,   24(%rsp) # sa_delta
+    mov   %rsp,    %rdx
 
     mov    $__NR_IOCTL, %rax # __NR_ioctl
     mov    %r13, %rdi
