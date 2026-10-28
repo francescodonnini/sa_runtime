@@ -247,7 +247,7 @@ _err_ioctl:     mov $3, %edi
                 jmp _die
 _err_pivot:     mov $4, %edi
                 jmp _die
-_err_protect:   mov $5, %edi
+_err_mprotect:   mov $5, %edi
 _die:
     mov $__NR_exit_group, %eax
     syscall
