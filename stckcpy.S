@@ -1,12 +1,8 @@
+#include "asm_consts.h"
+#include <asm/unistd.h>
+
 .equ STACK_SIZE,         0x800000
 .equ ADR_HINT,           0x100000000000
-.equ IOCTL_SHADOW_PIVOT, 0xc018ca73
-.equ __NR_MPROTECT,      10
-.equ __NR_OPEN,          2
-.equ __NR_CLOSE,         3
-.equ __NR_MMAP,          9
-.equ __NR_IOCTL,         16
-.equ __NR_EXIT,          60
 .global relocate_stack
 .extern _start
 
@@ -207,14 +203,14 @@ _patch_auxv_exit:
 
     mov %rax, %r13
 
-    sub   $32,     %rsp  # struct ioctl_pivot_params
-    movq  $0,     (%rsp) # error
-    mov   %r14,  8(%rsp) # new_stack_address
-    mov   %r15, 16(%rsp) # rsp
-    movq  $0,   24(%rsp) # sa_delta
-    mov   %rsp,    %rdx
+    sub   $PIVOT_FRAME, %rsp
+    movq  $0,    PIVOT_ERROR(%rsp)
+    mov   %r14,  PIVOT_NEW_STACK(%rsp)
+    mov   %r15,  PIVOT_RSP(%rsp)
+    movq  $0,    PIVOT_DELTA(%rsp)
+    mov   %rsp,  %rdx
 
-    mov    $__NR_IOCTL, %rax # __NR_ioctl
+    mov    $__NR_IOCTL, %rax
     mov    %r13, %rdi
     movabs $IOCTL_SHADOW_PIVOT, %rsi
     syscall
@@ -224,7 +220,7 @@ _patch_auxv_exit:
     cmpq $0, (%rsp)
     jne _out2
 
-    mov 24(%rsp), %rax
+    mov PIVOT_DELTA(%rsp), %rax
     mov __ss_shadow_offset@GOTPCREL(%rip), %rdi # mprotect's addr
     mov %rax, (%rdi)
 
@@ -235,7 +231,7 @@ _patch_auxv_exit:
     test %rax, %rax
     jnz _out2
 
-    add $32, %rsp
+    add $PIVOT_FRAME, %rsp
 
     mov $__NR_CLOSE, %rax   # __NR_close
     mov %r13, %rdi # close's fd

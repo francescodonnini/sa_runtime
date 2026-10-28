@@ -1,6 +1,6 @@
 #include "libsa.h"
 
-#include "ioctl.h"
+#include "uapi.h"
 
 #include <errno.h>
 #include <stdatomic.h>
@@ -116,7 +116,7 @@ void *sa_alloc_user_stack(void) {
 }
 
 long sa_claim(unsigned long stack_base) {
-    struct ioctl_alloc_params req = {.stack_base = stack_base};
+    struct ioctl_stack_params req = {.stack_base = stack_base};
     if (ioctl(shadow_fd, IOCTL_SHADOW_ALLOC, &req)) {
         perror("ioctl");
         return -errno;
@@ -153,7 +153,7 @@ long sa_init(unsigned long start, unsigned long end, unsigned long size) {
 }
 
 long sa_free_kernel_stack(void *stack_base) {
-    struct ioctl_unprepare_params req = {.stack_base = (unsigned long)stack_base};
+    struct ioctl_stack_params req = {.stack_base = (unsigned long)stack_base};
     long err = ioctl(shadow_fd, IOCTL_SHADOW_UNPREPARE, &req);
     if (err) {
         perror("ioctl");
@@ -164,7 +164,7 @@ long sa_free_kernel_stack(void *stack_base) {
 }
 
 long sa_mark_detached(void *stack_base) {
-    struct ioctl_detach_params req = {.stack_base = (uintptr_t)stack_base};
+    struct ioctl_stack_params req = {.stack_base = (uintptr_t)stack_base};
     if (ioctl(shadow_fd, IOCTL_SHADOW_DETACH, &req) < 0) {
         return -errno;
     }
@@ -172,7 +172,7 @@ long sa_mark_detached(void *stack_base) {
 }
 
 long sa_reclaim(void *stack_base) {
-    struct ioctl_reclaim_params req = {.stack_base = (unsigned long)stack_base};
+    struct ioctl_stack_params req = {.stack_base = (unsigned long)stack_base};
     long err = ioctl(shadow_fd, IOCTL_SHADOW_RECLAIM, &req);
     if (err) {
         perror("ioctl");

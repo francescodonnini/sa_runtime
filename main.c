@@ -1,5 +1,5 @@
-#include "ioctl.h"
 #include "libsa.h"
+#include "uapi.h"
 
 #include <dlfcn.h>
 #include <errno.h>
@@ -197,7 +197,7 @@ pid_t fork(void) {
     if (!pid) {
         close(sy_pipe[0]);
 
-        struct ioctl_fork_params req = {0};
+        struct ioctl_stack_params req = {0};
         if (ioctl(shadow_fd, IOCTL_SHADOW_FORK, &req) < 0 || req.error) {
             _exit(127);
         }
