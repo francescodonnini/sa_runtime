@@ -9,6 +9,15 @@
 .section .rodata
 dev_name: .asciz "/dev/shdwstck"
 
+.section .data.ss_offset, "aw", @progbits
+.balign 4096
+.globl __ss_shadow_offset
+.type  __ss_shadow_offset, @object
+.size  __ss_shadow_offset, 8
+__ss_shadow_offset:
+    .quad 0
+    .space 4096 - 8
+
 .section .text
 relocate_stack:
     mov     %rdx,       %r12 # save dl_fini
@@ -221,7 +230,7 @@ _patch_auxv_exit:
     jne _out2
 
     mov _IOCTL_PIVOT_DELTA(%rsp), %rax
-    mov __ss_shadow_offset@GOTPCREL(%rip), %rdi # mprotect's addr
+    lea __ss_shadow_offset(%rip), %rdi # mprotect's addr
     mov %rax, (%rdi)
 
     mov $__NR_mprotect, %rax
