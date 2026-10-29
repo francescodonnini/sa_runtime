@@ -236,6 +236,16 @@ _patch_auxv_exit:
     mov %r13, %rdi # close's fd
     syscall
 
+    mov  (%rsp), %rcx
+    lea  16(%rsp,%rcx,8), %rcx              
+    mov  environ@GOTPCREL(%rip), %rax
+    mov  %rcx, (%rax)
+
+    mov  program_invocation_name@GOTPCREL(%rip), %rax
+    add  %r9, (%rax)
+    mov  program_invocation_short_name@GOTPCREL(%rip), %rax
+    add  %r9, (%rax)
+
     mov %r12, %rdx
     jmp _start
 
