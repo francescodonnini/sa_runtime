@@ -6,6 +6,7 @@
 #include <fcntl.h>
 #include <immintrin.h>
 #include <pthread.h>
+#include <signal.h>
 #include <stddef.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -19,7 +20,7 @@
 #include <asm/prctl.h>
 
 #define STACK_START (0x100000000000UL)
-#define STACK_END   (0x200000000000UL)
+#define STACK_END   (0x108000000000UL)
 #define STACK_SIZE  (8UL * 1024 * 1024)
 
 struct trampoline_args {
@@ -196,33 +197,21 @@ int pthread_join(pthread_t t, void **retval) {
 }
 
 pid_t fork(void) {
-    int sy_pipe[2];
-    if (pipe2(sy_pipe, O_CLOEXEC) < 0) {
-        return -1;
-    }
-
     pid_t pid = real_fork();
     if (!pid) {
-        close(sy_pipe[0]);
-
         struct ioctl_stack_params req = {0};
-        if (ioctl(shadow_fd, IOCTL_SHADOW_FORK, &req) < 0 || req.error) {
+        if (ioctl(shadow_fd, IOCTL_SHADOW_FORK_CHILD, &req) < 0 || req.error) {
             _exit(127);
         }
 
         sa_reset_after_fork((void *)req.stack_base);
-        char done = '1';
-        (void)!write(sy_pipe[1], &done, 1);
-        close(sy_pipe[1]);
     } else if (pid > 0) {
-        close(sy_pipe[1]);
-
-        char done;
-        (void)!read(sy_pipe[0], &done, 1);
-        close(sy_pipe[0]);
-    } else {
-        close(sy_pipe[0]);
-        close(sy_pipe[1]);
+        struct ioctl_fork_params req = {
+            .child = pid,
+        };
+        if (ioctl(shadow_fd, IOCTL_SHADOW_FORK_PARENT, &req) < 0 || req.error) {
+            kill(pid, SIGKILL);
+        }
     }
 
     return pid;
