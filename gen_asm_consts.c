@@ -16,14 +16,15 @@
 
 /* request number, struct exchanged with the kernel */
 #define IOCTLS(X)                                                                                  \
-    X(IOCTL_SHADOW_ALLOC, ioctl_stack_params)                                                      \
-    X(IOCTL_SHADOW_FORK, ioctl_stack_params)                                                       \
-    X(IOCTL_SHADOW_DETACH, ioctl_stack_params)                                                     \
-    X(IOCTL_SHADOW_PIVOT, ioctl_pivot_params)                                                      \
-    X(IOCTL_SHADOW_PREPARE, ioctl_prepare_params)                                                  \
-    X(IOCTL_SHADOW_RECLAIM, ioctl_stack_params)                                                    \
-    X(IOCTL_SHADOW_RECLAIM_DEAD, ioctl_reclaim_dead_params)                                        \
-    X(IOCTL_SHADOW_UNPREPARE, ioctl_stack_params)
+X(IOCTL_SHADOW_ALLOC, ioctl_stack_params)                                                      \
+X(IOCTL_SHADOW_FORK_CHILD, ioctl_stack_params)                                                 \
+X(IOCTL_SHADOW_DETACH, ioctl_stack_params)                                                     \
+X(IOCTL_SHADOW_PIVOT, ioctl_pivot_params)                                                      \
+X(IOCTL_SHADOW_PREPARE, ioctl_prepare_params)                                                  \
+X(IOCTL_SHADOW_RECLAIM, ioctl_stack_params)                                                    \
+X(IOCTL_SHADOW_RECLAIM_DEAD, ioctl_reclaim_dead_params)                                        \
+X(IOCTL_SHADOW_UNPREPARE, ioctl_stack_params)                                                  \
+X(IOCTL_SHADOW_FORK_PARENT, ioctl_fork_params)
 
 #define ALIGN_UP(x, a) (((x) + (a) - 1) & ~((size_t)(a) - 1))
 
@@ -39,18 +40,18 @@ static void def(const char *prefix, const char *name, size_t value) {
 #define PRINT_IOCTL(name, type) printf("#define %-32s 0x%08x\n", #name, (unsigned int)(name));
 
 #define CHECK_IOCTL(name, type)                                                                    \
-    if (_IOC_SIZE(name) != sizeof(struct type)) {                                                  \
-        fprintf(stderr,                                                                            \
-                "gen_asm_consts: %s encodes size %u but struct %s "                                \
-                "is %zu bytes\n",                                                                  \
-                #name, (unsigned int)_IOC_SIZE(name), #type, sizeof(struct type));                 \
-        failed = 1;                                                                                \
-    }
+if (_IOC_SIZE(name) != sizeof(struct type)) {                                                  \
+    fprintf(stderr,                                                                            \
+    "gen_asm_consts: %s encodes size %u but struct %s "                                \
+    "is %zu bytes\n",                                                                  \
+    #name, (unsigned int)_IOC_SIZE(name), #type, sizeof(struct type));                 \
+    failed = 1;                                                                                \
+}
 
 /* size, stack space keeping %rsp 16-byte aligned, and field offsets */
 #define LAYOUT(prefix, type)                                                                       \
-    def(prefix, "SIZE", sizeof(struct type));                                                      \
-    def(prefix, "FRAME", ALIGN_UP(sizeof(struct type), 16))
+def(prefix, "SIZE", sizeof(struct type));                                                      \
+def(prefix, "FRAME", ALIGN_UP(sizeof(struct type), 16))
 
 #define OFF(prefix, type, field, name) def(prefix, name, offsetof(struct type, field))
 
@@ -96,6 +97,13 @@ int main(void) {
     OFF("_IOCTL_RECLAIM_DEAD", ioctl_reclaim_dead_params, bases, "BASES");
     OFF("_IOCTL_RECLAIM_DEAD", ioctl_reclaim_dead_params, cap, "CAP");
     OFF("_IOCTL_RECLAIM_DEAD", ioctl_reclaim_dead_params, count, "COUNT");
+    puts("");
+
+    puts("/* struct ioctl_fork_params */");
+    LAYOUT("_IOCTL_FORK", ioctl_fork_params);
+    OFF("_IOCTL_FORK", ioctl_fork_params, error, "ERROR");
+    OFF("_IOCTL_FORK", ioctl_fork_params, child, "CHILD");
+    OFF("_IOCTL_FORK", ioctl_fork_params, reserved, "RESERVED");
     puts("");
 
     puts("#endif");
