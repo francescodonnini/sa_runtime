@@ -95,8 +95,9 @@ static void reclaim_dead(void) {
 }
 
 static void *make_usable(void *stack) {
-    if (mprotect(stack, stack_size, PROT_READ | PROT_WRITE)) {
-        freelist_push(stack); /* ancora PROT_NONE: l'invariante regge */
+    if (mmap(stack, stack_size, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_FIXED, shadow_fd, 0) ==
+        MAP_FAILED) {
+        sa_release_user_stack(stack);
         return NULL;
     }
     return stack;

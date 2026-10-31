@@ -43,15 +43,15 @@ static real_pthread_join_t real_pthread_join;
 int shadow_fd = -1;
 
 static __attribute__((constructor)) void main_thread_init(void) {
-    // WARNING: for now I'm reserving STACK_START + STACK_SIZE for the main thread stack, this might
-    // be change in the future
-    if (sa_init(STACK_START + STACK_SIZE, STACK_END, STACK_SIZE)) {
-        exit(EXIT_FAILURE);
-    }
-
     shadow_fd = open("/dev/shdwstck", O_RDWR | O_CLOEXEC);
     if (shadow_fd < 0) {
         perror("cannot open shadowstack device");
+        exit(EXIT_FAILURE);
+    }
+
+    // WARNING: for now I'm reserving STACK_START + STACK_SIZE for the main thread stack, this might
+    // be change in the future
+    if (sa_init(STACK_START + STACK_SIZE, STACK_END, STACK_SIZE)) {
         exit(EXIT_FAILURE);
     }
 
@@ -70,10 +70,11 @@ static __attribute__((constructor)) void main_thread_init(void) {
 static void *thread_trampoline(void *argp) {
     struct trampoline_args t;
     memcpy(&t, argp, sizeof(t));
+    free(argp);
 
     long err = sa_claim((unsigned long)t.stack_base);
     if (err) {
-        fprintf(stderr, "shadowstack: claim failed %ld\n", err);
+        (void)fprintf(stderr, "shadowstack: claim failed %ld\n", err);
         abort();
     }
 
@@ -119,10 +120,17 @@ int pthread_create(pthread_t *thread, const pthread_attr_t *user_attr,
     }
 
     int err = 0;
+    struct trampoline_args *targs;
+    targs = malloc(sizeof(*targs));
+    if (!targs) {
+        err = ENOMEM;
+        goto attr_destroy;
+    }
+
     void *stack_base = sa_alloc_user_stack();
     if (!stack_base) {
         err = EAGAIN;
-        goto attr_destroy;
+        goto targs_destroy;
     }
 
     void *prev_stack = NULL;
@@ -142,12 +150,10 @@ int pthread_create(pthread_t *thread, const pthread_attr_t *user_attr,
         goto stack_destroy;
     }
 
-    struct trampoline_args *targs = stack_base;
     targs->fn = start_routine;
     targs->fn_arg = arg;
     targs->stack_base = stack_base;
     targs->stack_size = STACK_SIZE;
-
     err = real_pthread_create(thread, &attr, thread_trampoline, targs);
     if (!err) {
         if (!user_attr) {
@@ -160,6 +166,8 @@ int pthread_create(pthread_t *thread, const pthread_attr_t *user_attr,
     sa_free_kernel_stack(stack_base);
 stack_destroy:
     sa_release_user_stack(stack_base);
+targs_destroy:
+    free(targs);
 attr_destroy:
     if (!user_attr) {
         pthread_attr_destroy(&attr);

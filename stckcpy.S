@@ -20,14 +20,23 @@ __ss_shadow_offset:
 
 .section .text
 relocate_stack:
-    mov     %rdx,       %r12 # save dl_fini
+    mov %rdx, %r12 # save dl_fini
 
+    mov $__NR_open, %rax
+    lea dev_name(%rip), %rdi
+    mov $0x80002, %rsi # O_RDWR | O_CLOEXEC
+    xor %rdx, %rdx
+    syscall
+    test %rax, %rax
+    js   _err_open
+
+    mov    %rax,        %rbx
     mov    $__NR_mmap,  %rax
     movabs $ADR_HINT,   %rdi
     mov    $STACK_SIZE, %rsi
     mov    $3,          %rdx # PROT_READ | PROT_WRITE
-    mov    $0x100022,   %r10 # MAP_PRIVATE | MAP_ANONYMOUS | MAP_FIXED_NOREPLACE
-    mov    $-1,         %r8
+    mov    $0x100002,   %r10 # MAP_PRIVATE | MAP_ANONYMOUS | MAP_FIXED_NOREPLACE
+    mov    %rbx,        %r8
     xor    %r9,         %r9
     syscall
     cmp    $-4095, %rax
@@ -196,16 +205,7 @@ _patch_auxv_exit:
     mov %rsp, %r15 # %r15 = old stack pointer
     mov %rax, %rsp # %rax = new stack area
     mov %rax, %r14 # %r14 = new stack area (scratch variable)
-
-    mov $__NR_open, %rax
-    lea dev_name(%rip), %rdi
-    mov $2, %rsi # O_RDWR
-    xor %rdx, %rdx
-    syscall
-    test %rax, %rax
-    js   _err_open
     
-    mov %rax, %r13
     sub   $_IOCTL_PIVOT_FRAME, %rsp
     movq  $0,    _IOCTL_PIVOT_ERROR(%rsp)
     mov   %r14,  _IOCTL_PIVOT_NEW_STACK(%rsp)
@@ -213,7 +213,7 @@ _patch_auxv_exit:
     movq  $0,    _IOCTL_PIVOT_DELTA(%rsp)
     mov   %rsp,  %rdx
     mov    $__NR_ioctl, %rax
-    mov    %r13, %rdi
+    mov    %rbx, %rdi
     movabs $IOCTL_SHADOW_PIVOT, %rsi
     syscall
     test %rax, %rax
@@ -233,7 +233,7 @@ _patch_auxv_exit:
 
     add $_IOCTL_PIVOT_FRAME, %rsp
     mov $__NR_close, %rax
-    mov %r13, %rdi # close's fd
+    mov %rbx, %rdi # close's fd
     syscall
 
     mov  (%rsp), %rcx
@@ -249,9 +249,9 @@ _patch_auxv_exit:
     mov %r12, %rdx
     jmp _start
 
-_err_mmap:      mov $1, %edi
-                jmp _die
 _err_open:      mov $2, %edi
+                jmp _die
+_err_mmap:      mov $1, %edi
                 jmp _die
 _err_ioctl:     mov $3, %edi
                 jmp _die
