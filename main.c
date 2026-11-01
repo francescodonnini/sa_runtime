@@ -6,7 +6,6 @@
 #include <fcntl.h>
 #include <immintrin.h>
 #include <pthread.h>
-#include <signal.h>
 #include <stddef.h>
 #include <stdint.h>
 #include <stdio.h>
