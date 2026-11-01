@@ -30,7 +30,6 @@ struct trampoline_args {
     size_t stack_size;
 };
 
-typedef pid_t (*real_fork_t)(void);
 typedef int (*real_pthread_create_t)(pthread_t *, const pthread_attr_t *, void *(*)(void *),
                                      void *);
 typedef int (*real_pthread_detach_t)(pthread_t);
@@ -38,10 +37,20 @@ typedef int (*real_pthread_join_t)(pthread_t, void **);
 
 static real_pthread_create_t real_pthread_create;
 static real_pthread_detach_t real_pthread_detach;
-static real_fork_t real_fork;
 static real_pthread_join_t real_pthread_join;
 
 int shadow_fd = -1;
+
+static void after_fork_child(void) {
+    uintptr_t here = (uintptr_t)&here;
+    void *cur = (void *)(here & ~(STACK_SIZE - 1));
+
+    if (here < STACK_START || here >= STACK_END) {
+        return;
+    }
+
+    sa_reset_after_fork(cur);
+}
 
 static __attribute__((constructor)) void main_thread_init(void) {
     shadow_fd = open("/dev/shdwstck", O_RDWR | O_CLOEXEC);
@@ -56,9 +65,7 @@ static __attribute__((constructor)) void main_thread_init(void) {
         exit(EXIT_FAILURE);
     }
 
-    void *sym = dlsym(RTLD_NEXT, "fork");
-    memcpy((void *)&real_fork, (void *)&sym, sizeof(sym));
-    sym = dlsym(RTLD_NEXT, "pthread_create");
+    void *sym = dlsym(RTLD_NEXT, "pthread_create");
     memcpy((void *)&real_pthread_create, (void *)&sym, sizeof(sym));
     sym = dlsym(RTLD_NEXT, "pthread_detach");
     memcpy((void *)&real_pthread_detach, (void *)&sym, sizeof(sym));
@@ -66,6 +73,7 @@ static __attribute__((constructor)) void main_thread_init(void) {
     memcpy((void *)&real_pthread_join, (void *)&sym, sizeof(sym));
     // lo stack viene spostato tramite una procedura assembly per il momento
     // quindi serve un modo per risalire all'indirizzo
+    pthread_atfork(NULL, NULL, after_fork_child);
 }
 
 static void *thread_trampoline(void *argp) {
@@ -194,25 +202,4 @@ int pthread_join(pthread_t t, void **retval) {
     }
 
     return err;
-}
-
-pid_t fork(void) {
-    pid_t pid = real_fork();
-    if (!pid) {
-        struct ioctl_stack_params req = {0};
-        if (ioctl(shadow_fd, IOCTL_SHADOW_FORK_CHILD, &req) < 0 || req.error) {
-            _exit(127);
-        }
-
-        sa_reset_after_fork((void *)req.stack_base);
-    } else if (pid > 0) {
-        struct ioctl_fork_params req = {
-            .child = pid,
-        };
-        if (ioctl(shadow_fd, IOCTL_SHADOW_FORK_PARENT, &req) < 0 || req.error) {
-            kill(pid, SIGKILL);
-        }
-    }
-
-    return pid;
 }
