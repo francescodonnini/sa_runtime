@@ -52,7 +52,17 @@ static void after_fork_child(void) {
 }
 
 static __attribute__((constructor)) void main_thread_init(void) {
-    shadow_fd = open("/dev/shdwstck", O_RDWR | O_CLOEXEC);
+    int fd = open("/dev/shdwstck", O_RDWR | O_CLOEXEC);
+    if (fd < 0) {
+        perror("cannot open shadowstack device");
+        exit(EXIT_FAILURE);
+    }
+
+    // Linux picks up numbers for file descriptors starting from low values and
+    // some programs might log events containing file descriptor's numbers, we
+    // choose an high number to not mess with the protected program's logging
+    shadow_fd = fcntl(fd, F_DUPFD_CLOEXEC, 1000);
+    close(fd);
     if (shadow_fd < 0) {
         perror("cannot open shadowstack device");
         exit(EXIT_FAILURE);
