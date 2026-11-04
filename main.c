@@ -88,7 +88,6 @@ static __attribute__((constructor)) void main_thread_init(void) {
 static void *thread_trampoline(void *argp) {
     struct trampoline_args t;
     memcpy(&t, argp, sizeof(t));
-    free(argp);
 
     long err = sa_claim((unsigned long)t.stack_base);
     if (err) {
@@ -138,19 +137,13 @@ int pthread_create(pthread_t *thread, const pthread_attr_t *user_attr,
     }
 
     int err = 0;
-    struct trampoline_args *targs;
-    targs = malloc(sizeof(*targs));
-    if (!targs) {
-        err = ENOMEM;
-        goto attr_destroy;
-    }
-
     void *stack_base = sa_alloc_user_stack();
     if (!stack_base) {
         err = EAGAIN;
-        goto targs_destroy;
+        goto attr_destroy;
     }
 
+    struct trampoline_args *targs = stack_base;
     void *prev_stack = NULL;
     size_t prev_size;
     if (!pthread_attr_getstack(&attr, &prev_stack, &prev_size) && prev_stack) {
@@ -184,8 +177,6 @@ int pthread_create(pthread_t *thread, const pthread_attr_t *user_attr,
     sa_free_kernel_stack(stack_base);
 stack_destroy:
     sa_release_user_stack(stack_base);
-targs_destroy:
-    free(targs);
 attr_destroy:
     if (!user_attr) {
         pthread_attr_destroy(&attr);
