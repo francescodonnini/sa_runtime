@@ -9,6 +9,17 @@
 .section .rodata
 dev_name: .asciz "/dev/shdwstck"
 
+msg_open:     .ascii "shadowstack: cannot open /dev/shdwstck (is the module loaded?)\n"
+.equ msg_open_len, . - msg_open
+msg_mmap:     .ascii "shadowstack: cannot map the main thread stack\n"
+.equ msg_mmap_len, . - msg_mmap
+msg_ioctl:    .ascii "shadowstack: IOCTL_SHADOW_PIVOT failed\n"
+.equ msg_ioctl_len, . - msg_ioctl
+msg_pivot:    .ascii "shadowstack: pivot rejected by the module\n"
+.equ msg_pivot_len, . - msg_pivot
+msg_mprotect: .ascii "shadowstack: cannot make __ss_shadow_offset read-only\n"
+.equ msg_mprotect_len, . - msg_mprotect
+
 .section .data.ss_offset, "aw", @progbits
 .balign 4096
 .globl __ss_shadow_offset
@@ -249,17 +260,38 @@ _patch_auxv_exit:
     mov %r12, %rdx
     jmp _start
 
-_err_open:      mov $2, %edi
-                jmp _die
-_err_mmap:      mov $1, %edi
-                jmp _die
-_err_ioctl:     mov $3, %edi
-                jmp _die
-_err_pivot:     mov $4, %edi
-                jmp _die
-_err_mprotect:   mov $5, %edi
+# Error paths: %rsi = message, %rdx = length, %r13d = exit code.
+# %r13 is unused elsewhere; the process is about to exit, so nothing needs preserving.
+_err_open:
+    lea  msg_open(%rip), %rsi
+    mov  $msg_open_len, %edx
+    mov  $2, %r13d
+    jmp  _die
+_err_mmap:
+    lea  msg_mmap(%rip), %rsi
+    mov  $msg_mmap_len, %edx
+    mov  $1, %r13d
+    jmp  _die
+_err_ioctl:
+    lea  msg_ioctl(%rip), %rsi
+    mov  $msg_ioctl_len, %edx
+    mov  $3, %r13d
+    jmp  _die
+_err_pivot:
+    lea  msg_pivot(%rip), %rsi
+    mov  $msg_pivot_len, %edx
+    mov  $4, %r13d
+    jmp  _die
+_err_mprotect:
+    lea  msg_mprotect(%rip), %rsi
+    mov  $msg_mprotect_len, %edx
+    mov  $5, %r13d
 _die:
-    mov $__NR_exit_group, %eax
+    mov  $__NR_write, %eax
+    mov  $2, %edi            # stderr
+    syscall                  # result ignored: we exit either way
+    mov  %r13d, %edi
+    mov  $__NR_exit_group, %eax
     syscall
 
 .section .note.GNU-stack, "", @progbits
