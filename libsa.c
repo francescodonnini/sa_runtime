@@ -204,7 +204,7 @@ long sa_reclaim(void *stack_base) {
     return req.error;
 }
 
-void sa_reset_after_fork(void *current_stack) {
+void sa_reset_after_fork(void *current_stack, void *keep) {
     size_t used = (atomic_load(&next) - stack_start) / stack_size;
     if (used > (stack_end - stack_start) / stack_size) {
         used = (stack_end - stack_start) / stack_size;
@@ -215,7 +215,7 @@ void sa_reset_after_fork(void *current_stack) {
     }
     for (size_t i = 0; i < used; ++i) {
         void *s = (void *)(stack_start + (i * stack_size));
-        if (s != current_stack) {
+        if (s != current_stack && s != keep) {
             sa_release_user_stack(s);
         }
     }

@@ -6,6 +6,7 @@
 #include <fcntl.h>
 #include <immintrin.h>
 #include <pthread.h>
+#include <signal.h>
 #include <stddef.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -33,10 +34,71 @@ typedef int (*real_pthread_create_t)(pthread_t *, const pthread_attr_t *, void *
                                      void *);
 typedef int (*real_pthread_detach_t)(pthread_t);
 typedef int (*real_pthread_join_t)(pthread_t, void **);
+typedef int (*real_sigaltstack_t)(const stack_t *, stack_t *);
 
 static real_pthread_create_t real_pthread_create;
 static real_pthread_detach_t real_pthread_detach;
 static real_pthread_join_t real_pthread_join;
+static real_sigaltstack_t real_sigaltstack;
+
+// Here we keep track of both the original stack that the protected thread set as the signal
+// handler's stack and effective stack that the signal handler of the protected thread will use
+// as its stack
+static __thread stack_t user_ss = {.ss_flags = SS_DISABLE};
+static __thread void *alt_slot;
+static pthread_key_t alt_key;
+
+static void release_alt_slot(void *slot) {
+    sa_release_user_stack(slot);
+}
+
+int sigaltstack(const stack_t *ss, stack_t *old_ss) {
+    stack_t kss;
+    stack_t cur;
+    void *slot = NULL;
+    const stack_t *arg = ss;
+
+    if (ss && !(ss->ss_flags & SS_DISABLE)) {
+        slot = sa_alloc_user_stack();
+        if (!slot) {
+            errno = ENOMEM;
+            return -1;
+        }
+        kss = *ss;
+        if (kss.ss_size > STACK_SIZE) {
+            kss.ss_size = STACK_SIZE;
+        }
+        kss.ss_sp = (char *)slot + STACK_SIZE - kss.ss_size;
+        arg = &kss;
+    }
+
+    if (real_sigaltstack(arg, &cur) != 0) {
+        int e = errno;
+        if (slot) {
+            sa_release_user_stack(slot);
+        }
+        errno = e;
+        return -1;
+    }
+
+    if (old_ss) {
+        *old_ss = cur;
+        if (alt_slot && !(cur.ss_flags & SS_DISABLE)) {
+            old_ss->ss_sp = user_ss.ss_sp;
+            old_ss->ss_size = user_ss.ss_size;
+        }
+    }
+
+    if (ss) {
+        if (alt_slot) {
+            sa_release_user_stack(alt_slot);
+        }
+        alt_slot = slot;
+        user_ss = *ss;
+        pthread_setspecific(alt_key, alt_slot);
+    }
+    return 0;
+}
 
 static void after_fork_child(void) {
     uintptr_t here = (uintptr_t)&here;
@@ -46,7 +108,7 @@ static void after_fork_child(void) {
         return;
     }
 
-    sa_reset_after_fork(cur);
+    sa_reset_after_fork(cur, alt_slot);
 }
 
 static __attribute__((constructor)) void main_thread_init(void) {
@@ -75,6 +137,9 @@ static __attribute__((constructor)) void main_thread_init(void) {
     memcpy((void *)&real_pthread_detach, (void *)&sym, sizeof(sym));
     sym = dlsym(RTLD_NEXT, "pthread_join");
     memcpy((void *)&real_pthread_join, (void *)&sym, sizeof(sym));
+    sym = dlsym(RTLD_NEXT, "sigaltstack");
+    memcpy((void *)&real_sigaltstack, (void *)&sym, sizeof(sym));
+    pthread_key_create(&alt_key, release_alt_slot);
     // lo stack viene spostato tramite una procedura assembly per il momento
     // quindi serve un modo per risalire all'indirizzo
     pthread_atfork(NULL, NULL, after_fork_child);
