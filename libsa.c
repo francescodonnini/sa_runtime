@@ -220,3 +220,13 @@ void sa_reset_after_fork(void *current_stack, void *keep) {
         }
     }
 }
+
+bool sa_refresh_stack(void *alt_slot) {
+    int fd = shadow_open();
+    if (fd < 0) {
+        return false;
+    }
+    void *p = mmap(alt_slot, stack_size, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_FIXED, fd, 0);
+    close(fd);
+    return p != MAP_FAILED;
+}

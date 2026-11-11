@@ -113,6 +113,13 @@ static void after_fork_child(void) {
     }
 
     sa_reset_after_fork(cur, alt_slot);
+    if (alt_slot && alt_slot != cur && !sa_refresh_stack(alt_slot)) {
+        stack_t off = {.ss_flags = SS_DISABLE};
+        real_sigaltstack(&off, NULL);
+        sa_release_user_stack(alt_slot);
+        alt_slot = NULL;
+        user_ss = (stack_t){.ss_flags = SS_DISABLE};
+    }
 }
 
 static __attribute__((constructor)) void main_thread_init(void) {
