@@ -38,8 +38,6 @@ static real_pthread_create_t real_pthread_create;
 static real_pthread_detach_t real_pthread_detach;
 static real_pthread_join_t real_pthread_join;
 
-int shadow_fd = -1;
-
 static void after_fork_child(void) {
     uintptr_t here = (uintptr_t)&here;
     void *cur = (void *)(here & ~(STACK_SIZE - 1));
@@ -52,21 +50,18 @@ static void after_fork_child(void) {
 }
 
 static __attribute__((constructor)) void main_thread_init(void) {
+    // Checks that the device is available. Future operations open and close the file descriptor
+    // for each ioctl call (libsa.c): a descriptor opened at the beginning might be closed
+    // by programs that inheriths their descriptors from their parent (e.g. subprocess and
+    // multiprocessing from cpython) or might be assigned to another file. Some programs might
+    // set RLIMIT_NOFILE to a lower number than the one we were setting the shadow stack device's
+    // descriptor.
     int fd = open("/dev/shdwstck", O_RDWR | O_CLOEXEC);
     if (fd < 0) {
         perror("cannot open shadowstack device");
         exit(EXIT_FAILURE);
     }
-
-    // Linux picks up numbers for file descriptors starting from low values and
-    // some programs might log events containing file descriptor's numbers, we
-    // choose an high number to not mess with the protected program's logging
-    shadow_fd = fcntl(fd, F_DUPFD_CLOEXEC, 1000);
     close(fd);
-    if (shadow_fd < 0) {
-        perror("cannot open shadowstack device");
-        exit(EXIT_FAILURE);
-    }
 
     // WARNING: for now I'm reserving STACK_START + STACK_SIZE for the main thread stack, this might
     // be change in the future

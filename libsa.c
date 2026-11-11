@@ -6,12 +6,11 @@
 #include <stdatomic.h>
 #include <stdint.h>
 #include <stdio.h>
+#include <unistd.h>
 
 #include <sys/mman.h>
 
 #define RECLAIM_CAPACITY (64)
-
-extern int shadow_fd;
 
 static uint64_t stack_start;
 static uint64_t stack_end;
@@ -23,10 +22,26 @@ static _Atomic uint64_t *free_bits;
 
 static atomic_ulong next;
 
+static int shadow_open(void) {
+    return open("/dev/shdwstck", O_RDWR | O_CLOEXEC);
+}
+
+static long shadow_ioctl(unsigned long cmd, void *arg) {
+    int fd = shadow_open();
+    if (fd < 0) {
+        return -1;
+    }
+    long r = ioctl(fd, cmd, arg);
+    int saved = errno;
+    close(fd);
+    errno = saved;
+    return r;
+}
+
 long sa_alloc_shadow_stack(void *stack_base, bool detached) {
     struct ioctl_prepare_params req = {.stack_base = (unsigned long)stack_base,
                                        .detached = (__u8)detached};
-    long err = ioctl(shadow_fd, IOCTL_SHADOW_PREPARE, &req);
+    long err = shadow_ioctl(IOCTL_SHADOW_PREPARE, &req);
     if (err < 0) {
         perror("ioctl");
         return -errno;
@@ -87,7 +102,7 @@ void sa_release_user_stack(void *stack) {
 static void reclaim_dead(void) {
     uint64_t stacks[RECLAIM_CAPACITY];
     struct ioctl_reclaim_dead_params p = {.bases = (uintptr_t)stacks, .cap = RECLAIM_CAPACITY};
-    if (!ioctl(shadow_fd, IOCTL_SHADOW_RECLAIM_DEAD, &p) && p.error == 0) {
+    if (!shadow_ioctl(IOCTL_SHADOW_RECLAIM_DEAD, &p) && p.error == 0) {
         for (unsigned i = 0; i < p.count; ++i) {
             sa_release_user_stack((void *)stacks[i]);
         }
@@ -95,8 +110,14 @@ static void reclaim_dead(void) {
 }
 
 static void *make_usable(void *stack) {
-    if (mmap(stack, stack_size, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_FIXED, shadow_fd, 0) ==
-        MAP_FAILED) {
+    int fd = shadow_open();
+    void *p = fd < 0
+                  ? MAP_FAILED
+                  : mmap(stack, stack_size, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_FIXED, fd, 0);
+    if (fd >= 0) {
+        close(fd);
+    }
+    if (p == MAP_FAILED) {
         sa_release_user_stack(stack);
         return NULL;
     }
@@ -118,7 +139,7 @@ void *sa_alloc_user_stack(void) {
 
 long sa_claim(unsigned long stack_base) {
     struct ioctl_stack_params req = {.stack_base = stack_base};
-    if (ioctl(shadow_fd, IOCTL_SHADOW_ALLOC, &req)) {
+    if (shadow_ioctl(IOCTL_SHADOW_ALLOC, &req)) {
         perror("ioctl");
         return -errno;
     }
@@ -155,7 +176,7 @@ long sa_init(unsigned long start, unsigned long end, unsigned long size) {
 
 long sa_free_kernel_stack(void *stack_base) {
     struct ioctl_stack_params req = {.stack_base = (unsigned long)stack_base};
-    long err = ioctl(shadow_fd, IOCTL_SHADOW_UNPREPARE, &req);
+    long err = shadow_ioctl(IOCTL_SHADOW_UNPREPARE, &req);
     if (err) {
         perror("ioctl");
         return -errno;
@@ -166,7 +187,7 @@ long sa_free_kernel_stack(void *stack_base) {
 
 long sa_mark_detached(void *stack_base) {
     struct ioctl_stack_params req = {.stack_base = (uintptr_t)stack_base};
-    if (ioctl(shadow_fd, IOCTL_SHADOW_DETACH, &req) < 0) {
+    if (shadow_ioctl(IOCTL_SHADOW_DETACH, &req) < 0) {
         return -errno;
     }
     return req.error;
@@ -174,7 +195,7 @@ long sa_mark_detached(void *stack_base) {
 
 long sa_reclaim(void *stack_base) {
     struct ioctl_stack_params req = {.stack_base = (unsigned long)stack_base};
-    long err = ioctl(shadow_fd, IOCTL_SHADOW_RECLAIM, &req);
+    long err = shadow_ioctl(IOCTL_SHADOW_RECLAIM, &req);
     if (err) {
         perror("ioctl");
         return -errno;
