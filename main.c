@@ -35,11 +35,13 @@ typedef int (*real_pthread_create_t)(pthread_t *, const pthread_attr_t *, void *
 typedef int (*real_pthread_detach_t)(pthread_t);
 typedef int (*real_pthread_join_t)(pthread_t, void **);
 typedef int (*real_sigaltstack_t)(const stack_t *, stack_t *);
+typedef int (*real_pthread_getattr_np_t)(pthread_t, pthread_attr_t *);
 
 static real_pthread_create_t real_pthread_create;
 static real_pthread_detach_t real_pthread_detach;
 static real_pthread_join_t real_pthread_join;
 static real_sigaltstack_t real_sigaltstack;
+static real_pthread_getattr_np_t real_pthread_getattr_np;
 
 // Here we keep track of both the original stack that the protected thread set as the signal
 // handler's stack and effective stack that the signal handler of the protected thread will use
@@ -47,6 +49,8 @@ static real_sigaltstack_t real_sigaltstack;
 static __thread stack_t user_ss = {.ss_flags = SS_DISABLE};
 static __thread void *alt_slot;
 static pthread_key_t alt_key;
+
+static pthread_t main_thread;
 
 static void release_alt_slot(void *slot) {
     sa_release_user_stack(slot);
@@ -140,6 +144,9 @@ static __attribute__((constructor)) void main_thread_init(void) {
     sym = dlsym(RTLD_NEXT, "sigaltstack");
     memcpy((void *)&real_sigaltstack, (void *)&sym, sizeof(sym));
     pthread_key_create(&alt_key, release_alt_slot);
+    main_thread = pthread_self();
+    sym = dlsym(RTLD_NEXT, "pthread_getattr_np");
+    memcpy((void *)&real_pthread_getattr_np, (void *)&sym, sizeof(sym));
     // lo stack viene spostato tramite una procedura assembly per il momento
     // quindi serve un modo per risalire all'indirizzo
     pthread_atfork(NULL, NULL, after_fork_child);
@@ -262,4 +269,21 @@ int pthread_join(pthread_t t, void **retval) {
     }
 
     return err;
+}
+
+int pthread_getattr_np(pthread_t t, pthread_attr_t *attr) {
+    int err = real_pthread_getattr_np(t, attr);
+    if (err) {
+        return err;
+    }
+    void *base;
+    size_t size;
+    pthread_attr_getstack(attr, &base, &size);
+    if ((uintptr_t)base >= STACK_START && (uintptr_t)base < STACK_END) {
+        return 0;
+    }
+    if (t == main_thread) {
+        pthread_attr_setstack(attr, (void *)STACK_START, STACK_SIZE);
+    }
+    return 0;
 }
