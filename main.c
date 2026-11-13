@@ -299,7 +299,7 @@ typedef int (*join_fn)(pthread_t, void **, void *);
 /// Se il thread è detached oppure qualcun altro lo sta gia "joinando", allora il join
 /// fallisce. La procedura inserisce il thread nell'array pending in modo che reap_detached
 /// concorrentemente con join non causino race.
-static int join_reserved(pthread_t t, void **retval, join_fn join, void *ctx) {
+static int join_reserved(pthread_t t, void **retval, join_fn join, void *ctx, int busy_err) {
     void *base = stack_of(t);
     if (!base) {
         return join(t, retval, ctx); // non è un thread del runtime
@@ -310,7 +310,7 @@ static int join_reserved(pthread_t t, void **retval, join_fn join, void *ctx) {
     if (i >= 0) {
         // detached, oppure un altro join in corso: glibc restituisce EINVAL in entrambi i casi
         pthread_mutex_unlock(&lock);
-        return EINVAL;
+        return busy_err;
     }
 
     add_locked(t, NULL, JOINING);
@@ -355,21 +355,21 @@ static int do_clockjoin(pthread_t t, void **r, void *ctx) {
 }
 
 int pthread_join(pthread_t t, void **retval) {
-    return join_reserved(t, retval, do_join, NULL);
+    return join_reserved(t, retval, do_join, NULL, EINVAL);
 }
 
 int pthread_tryjoin_np(pthread_t t, void **retval) {
-    return join_reserved(t, retval, do_tryjoin, NULL);
+    return join_reserved(t, retval, do_tryjoin, NULL, EBUSY);
 }
 
 int pthread_timedjoin_np(pthread_t t, void **retval, const struct timespec *abstime) {
-    return join_reserved(t, retval, do_timedjoin, (void *)abstime);
+    return join_reserved(t, retval, do_timedjoin, (void *)abstime, EINVAL);
 }
 
 int pthread_clockjoin_np(pthread_t t, void **retval, clockid_t clock,
                          const struct timespec *abstime) {
     struct clock_args a = {clock, abstime};
-    return join_reserved(t, retval, do_clockjoin, &a);
+    return join_reserved(t, retval, do_clockjoin, &a, EINVAL);
 }
 
 int sigaltstack(const stack_t *ss, stack_t *old_ss) {
