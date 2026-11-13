@@ -6,6 +6,7 @@
 #include <stdatomic.h>
 #include <stdint.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <unistd.h>
 
 #include <sys/mman.h>
@@ -22,18 +23,6 @@ static atomic_ulong next;
 
 static int shadow_open(void) {
     return open("/dev/shdwstck", O_RDWR | O_CLOEXEC);
-}
-
-static long shadow_ioctl(unsigned long cmd, void *arg) {
-    int fd = shadow_open();
-    if (fd < 0) {
-        return -1;
-    }
-    long r = ioctl(fd, cmd, arg);
-    int saved = errno;
-    close(fd);
-    errno = saved;
-    return r;
 }
 
 static inline size_t used_words(void) {
@@ -77,6 +66,13 @@ static inline void *bump_alloc(void) {
 }
 
 void sa_release_user_stack(void *stack) {
+    uintptr_t s = (uintptr_t)stack;
+    // un indirizzo fuori dall'area, o non allineato a uno slot, è un errore del runtime:
+    // freelist_push scriverebbe fuori dalla bitmap, o renderebbe libero lo slot sbagliato
+    if (s < stack_start || s >= stack_end || (s - stack_start) % stack_size) {
+        (void)fprintf(stderr, "shadowstack: release of invalid slot %p\n", stack);
+        abort();
+    }
     if (mmap(stack, stack_size, PROT_NONE, MAP_FIXED | MAP_PRIVATE | MAP_ANONYMOUS | MAP_NORESERVE,
              -1, 0) == MAP_FAILED) {
         // slot is lost because it won't be inserted into the bitmap
@@ -135,6 +131,10 @@ long sa_init(unsigned long start, unsigned long end, unsigned long size) {
     return 0;
 }
 
+bool sa_ready(void) {
+    return free_bits != NULL;
+}
+
 void sa_reset_after_fork(void *current_stack, void *keep) {
     size_t used = (atomic_load(&next) - stack_start) / stack_size;
     if (used > (stack_end - stack_start) / stack_size) {
@@ -146,7 +146,8 @@ void sa_reset_after_fork(void *current_stack, void *keep) {
     }
     for (size_t i = 0; i < used; ++i) {
         void *s = (void *)(stack_start + (i * stack_size));
-        if (s != current_stack && s != keep) {
+        bool free = atomic_load(&free_bits[i / 64]) & (1ULL << (i & 63));
+        if (!free && s != current_stack && s != keep) {
             sa_release_user_stack(s);
         }
     }

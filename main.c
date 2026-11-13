@@ -7,6 +7,7 @@
 #include <immintrin.h>
 #include <pthread.h>
 #include <signal.h>
+#include <stdatomic.h>
 #include <stddef.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -23,66 +24,76 @@
 #define STACK_END   (0x108000000000UL)
 #define STACK_SIZE  (8UL * 1024 * 1024)
 
+typedef int (*real_pthread_clockjoin_np_t)(pthread_t, void **, clockid_t, const struct timespec *);
+typedef int (*real_pthread_create_t)(pthread_t *, const pthread_attr_t *, void *(*)(void *),
+                                     void *);
+typedef int (*real_pthread_detach_t)(pthread_t);
+typedef int (*real_pthread_join_t)(pthread_t, void **);
+typedef int (*real_pthread_timedjoin_np_t)(pthread_t, void **, const struct timespec *);
+typedef int (*real_pthread_tryjoin_np_t)(pthread_t, void **);
+typedef int (*real_pthread_getattr_np_t)(pthread_t, pthread_attr_t *);
+typedef int (*real_sigaltstack_t)(const stack_t *, stack_t *);
+
+static real_pthread_clockjoin_np_t real_pthread_clockjoin_np;
+static real_pthread_create_t real_pthread_create;
+static real_pthread_detach_t real_pthread_detach;
+static real_pthread_getattr_np_t real_pthread_getattr_np;
+static real_pthread_join_t real_pthread_join;
+static real_pthread_timedjoin_np_t real_pthread_timedjoin_np;
+static real_pthread_tryjoin_np_t real_pthread_tryjoin_np;
+static real_sigaltstack_t real_sigaltstack;
+
+enum slot_state { DETACHED, JOINING };
+
 static pthread_mutex_t lock = PTHREAD_MUTEX_INITIALIZER;
 static struct {
     pthread_t thread;
     void *stack;
+    enum slot_state state;
 } pending[(STACK_END - STACK_START) / STACK_SIZE];
 static size_t npending;
 
-static bool marked_locked(pthread_t t) {
+static ptrdiff_t find_locked(pthread_t t) {
     for (size_t i = 0; i < npending; ++i) {
-        if (pending[i].thread == t) {
-            return true;
+        if (pthread_equal(pending[i].thread, t)) {
+            return (ptrdiff_t)i;
         }
     }
-    return false;
+
+    return -1;
+}
+
+static void add_locked(pthread_t t, void *stack, enum slot_state state) {
+    pending[npending].thread = t;
+    pending[npending].stack = stack;
+    pending[npending].state = state;
+    npending++;
 }
 
 static bool is_marked_detached(pthread_t t) {
     pthread_mutex_lock(&lock);
-    bool marked = marked_locked(t);
+    ptrdiff_t i = find_locked(t);
+    bool detached = i >= 0 && pending[i].state == DETACHED;
     pthread_mutex_unlock(&lock);
-    return marked;
+    return detached;
 }
 
-static bool mark_detached(pthread_t t, void *stack) {
-    pthread_mutex_lock(&lock);
-    bool already_detached = marked_locked(t);
-    if (!already_detached) {
-        pending[npending].thread = t;
-        pending[npending].stack = stack;
-        npending++;
-    }
-    pthread_mutex_unlock(&lock);
-    return !already_detached;
+static void remove_locked(size_t i) {
+    pending[i] = pending[--npending];
 }
 
 static void reap_detached(void) {
     pthread_mutex_lock(&lock);
     for (size_t i = 0; i < npending;) {
-        if (!pthread_tryjoin_np(pending[i].thread, NULL)) {
+        if (pending[i].state == DETACHED && !real_pthread_tryjoin_np(pending[i].thread, NULL)) {
             sa_release_user_stack(pending[i].stack);
-            pending[i] = pending[--npending];
+            remove_locked(i);
         } else {
             ++i;
         }
     }
     pthread_mutex_unlock(&lock);
 }
-
-typedef int (*real_pthread_create_t)(pthread_t *, const pthread_attr_t *, void *(*)(void *),
-                                     void *);
-typedef int (*real_pthread_detach_t)(pthread_t);
-typedef int (*real_pthread_join_t)(pthread_t, void **);
-typedef int (*real_sigaltstack_t)(const stack_t *, stack_t *);
-typedef int (*real_pthread_getattr_np_t)(pthread_t, pthread_attr_t *);
-
-static real_pthread_create_t real_pthread_create;
-static real_pthread_detach_t real_pthread_detach;
-static real_pthread_join_t real_pthread_join;
-static real_sigaltstack_t real_sigaltstack;
-static real_pthread_getattr_np_t real_pthread_getattr_np;
 
 // Here we keep track of both the original stack that the protected thread set as the signal
 // handler's stack and effective stack that the signal handler of the protected thread will use
@@ -99,7 +110,6 @@ static void after_fork_child(void) {
 
     uintptr_t here = (uintptr_t)&here;
     void *cur = (void *)(here & ~(STACK_SIZE - 1));
-
     if (here < STACK_START || here >= STACK_END) {
         return;
     }
@@ -138,24 +148,37 @@ static __attribute__((constructor)) void main_thread_init(void) {
         exit(EXIT_FAILURE);
     }
 
-    void *sym = dlsym(RTLD_NEXT, "pthread_create");
+    void *sym = dlsym(RTLD_NEXT, "pthread_clockjoin_np");
+    memcpy((void *)&real_pthread_clockjoin_np, (void *)&sym, sizeof(sym));
+    sym = dlsym(RTLD_NEXT, "pthread_create");
     memcpy((void *)&real_pthread_create, (void *)&sym, sizeof(sym));
     sym = dlsym(RTLD_NEXT, "pthread_detach");
     memcpy((void *)&real_pthread_detach, (void *)&sym, sizeof(sym));
+    sym = dlsym(RTLD_NEXT, "pthread_getattr_np");
+    memcpy((void *)&real_pthread_getattr_np, (void *)&sym, sizeof(sym));
     sym = dlsym(RTLD_NEXT, "pthread_join");
     memcpy((void *)&real_pthread_join, (void *)&sym, sizeof(sym));
+    sym = dlsym(RTLD_NEXT, "pthread_timedjoin_np");
+    memcpy((void *)&real_pthread_timedjoin_np, (void *)&sym, sizeof(sym));
+    sym = dlsym(RTLD_NEXT, "pthread_tryjoin_np");
+    memcpy((void *)&real_pthread_tryjoin_np, (void *)&sym, sizeof(sym));
     sym = dlsym(RTLD_NEXT, "sigaltstack");
     memcpy((void *)&real_sigaltstack, (void *)&sym, sizeof(sym));
     pthread_key_create(&alt_key, release_alt_slot);
     main_thread = pthread_self();
-    sym = dlsym(RTLD_NEXT, "pthread_getattr_np");
-    memcpy((void *)&real_pthread_getattr_np, (void *)&sym, sizeof(sym));
     // lo stack viene spostato tramite una procedura assembly per il momento
     // quindi serve un modo per risalire all'indirizzo
     pthread_atfork(NULL, NULL, after_fork_child);
 }
 
+/// Ritorna lo stack associato al thread identificato da pthread_t t solamente
+/// se t non è il main thread ed è un thread direttamente gestito da questa libreria
+/// cioè lo stack cade nella regionde degli indirizzi gestita dal dispositivo
 static inline void *stack_of(pthread_t t) {
+    if (pthread_equal(t, main_thread)) {
+        return NULL;
+    }
+
     pthread_attr_t attr;
     if (pthread_getattr_np(t, &attr) != 0) {
         return NULL;
@@ -190,18 +213,32 @@ int pthread_create(pthread_t *thread, const pthread_attr_t *user_attr,
         goto out;
     }
 
-    if (pthread_attr_setstack(&attr, stack_base, STACK_SIZE) ||
-        pthread_attr_setdetachstate(&attr, PTHREAD_CREATE_JOINABLE)) {
+    err = pthread_attr_setstack(&attr, stack_base, STACK_SIZE);
+    if (err) {
         sa_release_user_stack(stack_base);
-        err = EINVAL;
         goto out;
+    }
+
+    err = pthread_attr_setdetachstate(&attr, PTHREAD_CREATE_JOINABLE);
+    if (err) {
+        sa_release_user_stack(stack_base);
+        goto out;
+    }
+
+    bool detached = detach_state == PTHREAD_CREATE_DETACHED;
+    if (detached) {
+        pthread_mutex_lock(&lock);
     }
 
     err = real_pthread_create(thread, &attr, start_routine, arg);
     if (err) {
         sa_release_user_stack(stack_base);
-    } else if (detach_state == PTHREAD_CREATE_DETACHED) {
-        mark_detached(*thread, stack_base);
+    } else if (detached) {
+        add_locked(*thread, stack_base, DETACHED);
+    }
+
+    if (detached) {
+        pthread_mutex_unlock(&lock);
     }
 
 out:
@@ -212,14 +249,32 @@ out:
     return err;
 }
 
+/// Un thread gestito dal dispositivo non può essere effettivamente marcato
+/// come detached ma ci si limita a segnare nell'array che il programma l'ha
+/// segnato come tale. Se invece il thread non è direttamente gestito dal dispositivo
+/// si chiama la vera pthread_detach
 int pthread_detach(pthread_t t) {
     void *base = stack_of(t);
-    if (pthread_equal(t, main_thread) || !base) {
+    if (!base) {
         return real_pthread_detach(t);
     }
-    return mark_detached(t, base) ? 0 : EINVAL;
+
+    pthread_mutex_lock(&lock);
+    int err = 0;
+    ptrdiff_t i = find_locked(t);
+    if (i < 0) {
+        add_locked(t, base, DETACHED);
+    } else if (pending[i].state == DETACHED) {
+        err = EINVAL; // già detached
+    }
+
+    pthread_mutex_unlock(&lock);
+    return err;
 }
 
+/// Tutti i thread sono joinable, quindi è fondamentale mascherare questa caratteristica
+/// al programma; se quest'ultimo ha creato un thread detached non può leggere che quel
+/// thread è joinable.
 int pthread_getattr_np(pthread_t t, pthread_attr_t *attr) {
     int err = real_pthread_getattr_np(t, attr);
     if (err) {
@@ -239,17 +294,82 @@ int pthread_getattr_np(pthread_t t, pthread_attr_t *attr) {
     return 0;
 }
 
-int pthread_join(pthread_t t, void **retval) {
-    if (is_marked_detached(t)) {
+typedef int (*join_fn)(pthread_t, void **, void *);
+
+/// Se il thread è detached oppure qualcun altro lo sta gia "joinando", allora il join
+/// fallisce. La procedura inserisce il thread nell'array pending in modo che reap_detached
+/// concorrentemente con join non causino race.
+static int join_reserved(pthread_t t, void **retval, join_fn join, void *ctx) {
+    void *base = stack_of(t);
+    if (!base) {
+        return join(t, retval, ctx); // non è un thread del runtime
+    }
+
+    pthread_mutex_lock(&lock);
+    ptrdiff_t i = find_locked(t);
+    if (i >= 0) {
+        // detached, oppure un altro join in corso: glibc restituisce EINVAL in entrambi i casi
+        pthread_mutex_unlock(&lock);
         return EINVAL;
     }
-    void *base = stack_of(t);
-    int err = real_pthread_join(t, retval);
-    if (!err && base) {
+
+    add_locked(t, NULL, JOINING);
+    pthread_mutex_unlock(&lock);
+    int err = join(t, retval, ctx);
+    pthread_mutex_lock(&lock);
+    i = find_locked(t);
+    if (i >= 0) {
+        remove_locked((size_t)i);
+    }
+
+    pthread_mutex_unlock(&lock);
+    if (!err) {
         sa_release_user_stack(base);
     }
 
     return err;
+}
+
+static int do_join(pthread_t t, void **r, void *ctx) {
+    (void)ctx;
+    return real_pthread_join(t, r);
+}
+
+static int do_tryjoin(pthread_t t, void **r, void *ctx) {
+    (void)ctx;
+    return real_pthread_tryjoin_np(t, r);
+}
+
+static int do_timedjoin(pthread_t t, void **r, void *ctx) {
+    return real_pthread_timedjoin_np(t, r, ctx);
+}
+
+struct clock_args {
+    clockid_t clock;
+    const struct timespec *abstime;
+};
+
+static int do_clockjoin(pthread_t t, void **r, void *ctx) {
+    struct clock_args *a = ctx;
+    return real_pthread_clockjoin_np(t, r, a->clock, a->abstime);
+}
+
+int pthread_join(pthread_t t, void **retval) {
+    return join_reserved(t, retval, do_join, NULL);
+}
+
+int pthread_tryjoin_np(pthread_t t, void **retval) {
+    return join_reserved(t, retval, do_tryjoin, NULL);
+}
+
+int pthread_timedjoin_np(pthread_t t, void **retval, const struct timespec *abstime) {
+    return join_reserved(t, retval, do_timedjoin, (void *)abstime);
+}
+
+int pthread_clockjoin_np(pthread_t t, void **retval, clockid_t clock,
+                         const struct timespec *abstime) {
+    struct clock_args a = {clock, abstime};
+    return join_reserved(t, retval, do_clockjoin, &a);
 }
 
 int sigaltstack(const stack_t *ss, stack_t *old_ss) {

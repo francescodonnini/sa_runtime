@@ -21,6 +21,8 @@ long sa_free_kernel_stack(void *stack_base);
 
 long sa_mark_detached(void *stack_base);
 
+bool sa_ready(void);
+
 long sa_reclaim(void *stack_base);
 
 void sa_release_user_stack(void *stack);
