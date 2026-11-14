@@ -101,7 +101,6 @@ static void reap_detached(void) {
 static __thread stack_t user_ss = {.ss_flags = SS_DISABLE};
 static __thread void *alt_slot;
 static pthread_key_t alt_key;
-
 static pthread_t main_thread;
 
 static void after_fork_child(void) {
@@ -129,19 +128,6 @@ static void release_alt_slot(void *slot) {
 }
 
 static __attribute__((constructor)) void main_thread_init(void) {
-    // Checks that the device is available. Future operations open and close the file descriptor
-    // for each ioctl call (libsa.c): a descriptor opened at the beginning might be closed
-    // by programs that inheriths their descriptors from their parent (e.g. subprocess and
-    // multiprocessing from cpython) or might be assigned to another file. Some programs might
-    // set RLIMIT_NOFILE to a lower number than the one we were setting the shadow stack device's
-    // descriptor.
-    int fd = open("/dev/shdwstck", O_RDWR | O_CLOEXEC);
-    if (fd < 0) {
-        perror("cannot open shadowstack device");
-        exit(EXIT_FAILURE);
-    }
-    close(fd);
-
     // WARNING: for now I'm reserving STACK_START + STACK_SIZE for the main thread stack, this might
     // be change in the future
     if (sa_init(STACK_START + STACK_SIZE, STACK_END, STACK_SIZE)) {

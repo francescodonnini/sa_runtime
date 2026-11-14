@@ -10,6 +10,7 @@
 #include <unistd.h>
 
 #include <sys/mman.h>
+#include <sys/stat.h>
 
 static uint64_t stack_start;
 static uint64_t stack_end;
@@ -21,8 +22,51 @@ static _Atomic uint64_t *free_bits;
 
 static atomic_ulong next;
 
-static int shadow_open(void) {
-    return open("/dev/shdwstck", O_RDWR | O_CLOEXEC);
+// Lontano dai descrittori bassi, che alcuni programmi si aspettano liberi (es. i test di
+// PHP); se RLIMIT_NOFILE è troppo basso, resta dove l'ha messo open.
+#define DEV_FD_MIN 512
+
+// Descrittore del dispositivo, aperto in sa_init e riusato: una sandbox (es. Landlock in xz)
+// blocca le nuove aperture, ma non l'uso di un descrittore già aperto. Il programma però
+// può chiuderlo o riassegnarne il numero a un altro file: prima di ogni uso si controlla
+// che sia ancora il dispositivo, e in caso contrario lo si riapre.
+static atomic_int dev_fd = -1;
+static dev_t dev_rdev;
+
+static int open_device(void) {
+    int fd = open("/dev/shdwstck", O_RDWR | O_CLOEXEC);
+    if (fd < 0) {
+        return -1;
+    }
+    int high = fcntl(fd, F_DUPFD_CLOEXEC, DEV_FD_MIN);
+    if (high >= 0) {
+        close(fd);
+        fd = high;
+    }
+    return fd;
+}
+
+static bool is_device(int fd) {
+    struct stat st;
+    return fd >= 0 && fstat(fd, &st) == 0 && S_ISCHR(st.st_mode) && st.st_rdev == dev_rdev;
+}
+
+static int shadow_fd(void) {
+    int fd = atomic_load(&dev_fd);
+    if (is_device(fd)) {
+        return fd;
+    }
+    // chiuso o riassegnato dal programma: il vecchio numero non è più nostro, quindi non
+    // va chiuso; se ne apre uno nuovo
+    int nfd = open_device();
+    if (nfd < 0) {
+        return -1;
+    }
+    if (!atomic_compare_exchange_strong(&dev_fd, &fd, nfd)) {
+        close(nfd); // un altro thread l'ha già riaperto
+        return atomic_load(&dev_fd);
+    }
+    return nfd;
 }
 
 static inline size_t used_words(void) {
@@ -82,7 +126,7 @@ void sa_release_user_stack(void *stack) {
 }
 
 static void *make_usable(void *stack) {
-    int fd = shadow_open();
+    int fd = shadow_fd();
     void *p = fd < 0
                   ? MAP_FAILED
                   : mmap(stack, stack_size, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_FIXED, fd, 0);
@@ -109,6 +153,14 @@ long sa_init(unsigned long start, unsigned long end, unsigned long size) {
         return -EINVAL;
     }
 
+    int fd = open_device();
+    struct stat st;
+    if (fd < 0 || fstat(fd, &st) != 0) {
+        perror("cannot open shadowstack device");
+        return -errno;
+    }
+    dev_rdev = st.st_rdev;
+    atomic_store(&dev_fd, fd);
     if (mmap((void *)start, end - start, PROT_NONE,
              MAP_PRIVATE | MAP_ANONYMOUS | MAP_FIXED_NOREPLACE | MAP_NORESERVE, -1,
              0) == MAP_FAILED) {
@@ -154,7 +206,7 @@ void sa_reset_after_fork(void *current_stack, void *keep) {
 }
 
 bool sa_refresh_stack(void *stack) {
-    int fd = shadow_open();
+    int fd = shadow_fd();
     if (fd < 0) {
         return false;
     }
