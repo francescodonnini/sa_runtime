@@ -15,14 +15,7 @@
 #include <stdio.h>
 
 /* request number, struct exchanged with the kernel */
-#define IOCTLS(X)                                                                                  \
-    X(IOCTL_SHADOW_ALLOC, ioctl_stack_params)                                                      \
-    X(IOCTL_SHADOW_DETACH, ioctl_stack_params)                                                     \
-    X(IOCTL_SHADOW_PIVOT, ioctl_pivot_params)                                                      \
-    X(IOCTL_SHADOW_PREPARE, ioctl_prepare_params)                                                  \
-    X(IOCTL_SHADOW_RECLAIM, ioctl_stack_params)                                                    \
-    X(IOCTL_SHADOW_RECLAIM_DEAD, ioctl_reclaim_dead_params)                                        \
-    X(IOCTL_SHADOW_UNPREPARE, ioctl_stack_params)
+#define IOCTLS(X) X(IOCTL_SHADOW_PIVOT, ioctl_pivot_params)
 
 #define ALIGN_UP(x, a) (((x) + (a) - 1) & ~((size_t)(a) - 1))
 
@@ -68,33 +61,12 @@ int main(void) {
     IOCTLS(PRINT_IOCTL)
     puts("");
 
-    puts("/* struct ioctl_stack_params */");
-    LAYOUT("_IOCTL_STACK", ioctl_stack_params);
-    OFF("_IOCTL_STACK", ioctl_stack_params, error, "ERROR");
-    OFF("_IOCTL_STACK", ioctl_stack_params, stack_base, "BASE");
-    puts("");
-
     puts("/* struct ioctl_pivot_params */");
     LAYOUT("_IOCTL_PIVOT", ioctl_pivot_params);
     OFF("_IOCTL_PIVOT", ioctl_pivot_params, error, "ERROR");
     OFF("_IOCTL_PIVOT", ioctl_pivot_params, new_stack_address, "NEW_STACK");
     OFF("_IOCTL_PIVOT", ioctl_pivot_params, rsp, "RSP");
     OFF("_IOCTL_PIVOT", ioctl_pivot_params, delta, "DELTA");
-    puts("");
-
-    puts("/* struct ioctl_prepare_params */");
-    LAYOUT("_IOCTL_PREPARE", ioctl_prepare_params);
-    OFF("_IOCTL_PREPARE", ioctl_prepare_params, error, "ERROR");
-    OFF("_IOCTL_PREPARE", ioctl_prepare_params, stack_base, "BASE");
-    OFF("_IOCTL_PREPARE", ioctl_prepare_params, detached, "DETACHED");
-    puts("");
-
-    puts("/* struct ioctl_reclaim_dead_params */");
-    LAYOUT("_IOCTL_RECLAIM_DEAD", ioctl_reclaim_dead_params);
-    OFF("_IOCTL_RECLAIM_DEAD", ioctl_reclaim_dead_params, error, "ERROR");
-    OFF("_IOCTL_RECLAIM_DEAD", ioctl_reclaim_dead_params, bases, "BASES");
-    OFF("_IOCTL_RECLAIM_DEAD", ioctl_reclaim_dead_params, cap, "CAP");
-    OFF("_IOCTL_RECLAIM_DEAD", ioctl_reclaim_dead_params, count, "COUNT");
     puts("");
 
     puts("#endif");
