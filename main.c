@@ -43,6 +43,65 @@ static real_pthread_timedjoin_np_t real_pthread_timedjoin_np;
 static real_pthread_tryjoin_np_t real_pthread_tryjoin_np;
 static real_sigaltstack_t real_sigaltstack;
 
+/// Stack allocati dal programma tramite mmap(MAP_STACK) (per esempio le fibre di PHP) e
+/// serviti dal dispositivo.
+static void *_Atomic foreign_base[(STACK_END - STACK_START) / STACK_SIZE];
+
+static inline size_t slot_index(uintptr_t a) {
+    return (a - STACK_START) / STACK_SIZE;
+}
+
+static void *sys_mmap(void *addr, size_t len, int prot, int flags, int fd, off_t off) {
+    return (void *)syscall(SYS_mmap, addr, len, prot, flags, fd, off);
+}
+
+/// Si intercettano le chiamate a mmap(MAP_STACK) che allocano uno stack perché deve tale area
+/// di memoria deve essere servita dal dispositivo (pena il crash del programma).
+void *mmap(void *addr, size_t len, int prot, int flags, int fd, off_t off) {
+    size_t rounded = (len + 4095) & ~(size_t)4095;
+    if ((flags & MAP_STACK) && (flags & MAP_ANONYMOUS) && !(flags & MAP_FIXED) && !addr &&
+        rounded && rounded <= STACK_SIZE && sa_ready()) {
+        void *slot = sa_alloc_user_stack();
+        if (slot) {
+            void *p = (char *)slot + STACK_SIZE - rounded;
+            if (prot != (PROT_READ | PROT_WRITE) && mprotect(p, rounded, prot)) {
+                sa_release_user_stack(slot);
+                return MAP_FAILED;
+            }
+            atomic_store(&foreign_base[slot_index((uintptr_t)slot)], p);
+            return p;
+        }
+        // slot esauriti: lo stack resta fuori dall'area, e il codice strumentato che ci
+        // gira si fermerà al primo prologo
+    }
+    return sys_mmap(addr, len, prot, flags, fd, off);
+}
+
+void *mmap64(void *addr, size_t len, int prot, int flags, int fd, off_t off) {
+    return mmap(addr, len, prot, flags, fd, off);
+}
+
+int munmap(void *addr, size_t len) {
+    uintptr_t a = (uintptr_t)addr;
+    if (a < STACK_START || a >= STACK_END) {
+        return (int)syscall(SYS_munmap, addr, len);
+    }
+    size_t i = slot_index(a);
+    void *expected = addr;
+    if (atomic_compare_exchange_strong(&foreign_base[i], &expected, NULL)) {
+        sa_release_user_stack((void *)(STACK_START + i * STACK_SIZE));
+        return 0;
+    }
+    // L'area non si smonta mai: in un buco il kernel potrebbe collocare altre mappature,
+    // che il runtime ricoprirebbe liberando lo slot. La memoria torna al kernel (lo shadow
+    // con la close), la riserva resta, e lo slot resta di chi lo possiede.
+    size_t n = (a + len > STACK_END ? STACK_END : a + len) - a;
+    return sys_mmap(addr, n, PROT_NONE, MAP_PRIVATE | MAP_ANONYMOUS | MAP_FIXED | MAP_NORESERVE, -1,
+                    0) == MAP_FAILED
+               ? -1
+               : 0;
+}
+
 enum slot_state { DETACHED, JOINING };
 
 static pthread_mutex_t lock = PTHREAD_MUTEX_INITIALIZER;
@@ -103,6 +162,15 @@ static __thread void *alt_slot;
 static pthread_key_t alt_key;
 static pthread_t main_thread;
 
+static bool keep_after_fork(void *slot, void *ctx) {
+    if (slot == ctx || slot == alt_slot) {
+        return true;
+    }
+
+    atomic_store(&foreign_base[slot_index((uintptr_t)slot)], NULL);
+    return false;
+}
+
 static void after_fork_child(void) {
     npending = 0;
     pthread_mutex_init(&lock, NULL);
@@ -113,7 +181,7 @@ static void after_fork_child(void) {
         return;
     }
 
-    sa_reset_after_fork(cur, alt_slot);
+    sa_reset_after_fork(keep_after_fork, cur);
     if (alt_slot && alt_slot != cur && !sa_refresh_stack(alt_slot)) {
         stack_t off = {.ss_flags = SS_DISABLE};
         real_sigaltstack(&off, NULL);
@@ -128,8 +196,8 @@ static void release_alt_slot(void *slot) {
 }
 
 static __attribute__((constructor)) void main_thread_init(void) {
-    // WARNING: for now I'm reserving STACK_START + STACK_SIZE for the main thread stack, this might
-    // be change in the future
+    // WARNING: Per ora lo stack del main thread viene allocato in [STACK_START, STACK_START +
+    // STACK_SIZE), in futuro la posizione dovrà essere randomizzata.
     if (sa_init(STACK_START + STACK_SIZE, STACK_END, STACK_SIZE)) {
         exit(EXIT_FAILURE);
     }

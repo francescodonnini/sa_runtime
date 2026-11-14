@@ -111,7 +111,7 @@ static inline void *bump_alloc(void) {
 
 void sa_release_user_stack(void *stack) {
     uintptr_t s = (uintptr_t)stack;
-    // un indirizzo fuori dall'area, o non allineato a uno slot, è un errore del runtime:
+    // Un indirizzo fuori dall'area, o non allineato a uno slot, è un errore del runtime:
     // freelist_push scriverebbe fuori dalla bitmap, o renderebbe libero lo slot sbagliato
     if (s < stack_start || s >= stack_end || (s - stack_start) % stack_size) {
         (void)fprintf(stderr, "shadowstack: release of invalid slot %p\n", stack);
@@ -119,7 +119,7 @@ void sa_release_user_stack(void *stack) {
     }
     if (mmap(stack, stack_size, PROT_NONE, MAP_FIXED | MAP_PRIVATE | MAP_ANONYMOUS | MAP_NORESERVE,
              -1, 0) == MAP_FAILED) {
-        // slot is lost because it won't be inserted into the bitmap
+        // Lo slot viene perso per sempre perché non verrà rimesso nella freelist.
         return;
     }
     freelist_push(stack);
@@ -184,19 +184,18 @@ bool sa_ready(void) {
     return free_bits != NULL;
 }
 
-void sa_reset_after_fork(void *current_stack, void *keep) {
+/// Ripristina tutti gli slot della free-list eccetto quelli copiati
+/// da fork().
+void sa_reset_after_fork(bool (*keep)(void *slot, void *ctx), void *cur_fork) {
     size_t used = (atomic_load(&next) - stack_start) / stack_size;
     if (used > (stack_end - stack_start) / stack_size) {
         used = (stack_end - stack_start) / stack_size;
     }
 
-    for (size_t w = 0; w < (used + 63) / 64; ++w) {
-        atomic_store(&free_bits[w], 0);
-    }
     for (size_t i = 0; i < used; ++i) {
         void *s = (void *)(stack_start + (i * stack_size));
         bool free = atomic_load(&free_bits[i / 64]) & (1ULL << (i & 63));
-        if (!free && s != current_stack && s != keep) {
+        if (!free && !keep(s, cur_fork)) {
             sa_release_user_stack(s);
         }
     }

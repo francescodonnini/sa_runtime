@@ -27,7 +27,7 @@ long sa_reclaim(void *stack_base);
 
 void sa_release_user_stack(void *stack);
 
-void sa_reset_after_fork(void *current_stack, void *keep);
+void sa_reset_after_fork(bool (*keep)(void *slot, void *ctx), void *cur_fork);
 
 bool sa_refresh_stack(void *alt_slot);
 #endif
