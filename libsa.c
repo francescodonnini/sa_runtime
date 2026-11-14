@@ -130,9 +130,6 @@ static void *make_usable(void *stack) {
     void *p = fd < 0
                   ? MAP_FAILED
                   : mmap(stack, stack_size, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_FIXED, fd, 0);
-    if (fd >= 0) {
-        close(fd);
-    }
     if (p == MAP_FAILED) {
         sa_release_user_stack(stack);
         return NULL;
@@ -210,7 +207,6 @@ bool sa_refresh_stack(void *stack) {
     if (fd < 0) {
         return false;
     }
-    void *p = mmap(stack, stack_size, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_FIXED, fd, 0);
-    close(fd);
-    return p != MAP_FAILED;
+    return mmap(stack, stack_size, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_FIXED, fd, 0) !=
+           MAP_FAILED;
 }
