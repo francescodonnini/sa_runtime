@@ -62,6 +62,11 @@ $(ASM_CONSTS): $(GEN_BIN)
 $(BUILD):
 	mkdir -p $@
 
+pt:
+	gcc -I$(UAPI_DIR) -O2 -fPIC -ffreestanding -fno-builtin -fno-stack-protector -fcf-protection=none \
+    -nostdlib -static-pie -Wl,-e,_start -Wl,-z,noexecstack \
+    -o ld-shadow.so entry.S pt_interpreter.c
+
 compdb: clean
 	bear -- $(MAKE)
 

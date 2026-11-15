@@ -1,4 +1,4 @@
 build
 local.mk
 .cache
-compile_commands.json
+compile_commands.jsonld-shadow.so

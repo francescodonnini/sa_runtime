@@ -15,7 +15,9 @@
 #include <stdio.h>
 
 /* request number, struct exchanged with the kernel */
-#define IOCTLS(X) X(IOCTL_SHADOW_PIVOT, ioctl_pivot_params)
+#define IOCTLS(X)                                                                                  \
+    X(IOCTL_SHADOW_PIVOT, struct ioctl_pivot_params)                                               \
+    X(IOCTL_SHADOW_GET_OFFSET, __u64)
 
 #define ALIGN_UP(x, a) (((x) + (a) - 1) & ~((size_t)(a) - 1))
 
@@ -31,11 +33,9 @@ static void def(const char *prefix, const char *name, size_t value) {
 #define PRINT_IOCTL(name, type) printf("#define %-32s 0x%08x\n", #name, (unsigned int)(name));
 
 #define CHECK_IOCTL(name, type)                                                                    \
-    if (_IOC_SIZE(name) != sizeof(struct type)) {                                                  \
-        fprintf(stderr,                                                                            \
-                "gen_asm_consts: %s encodes size %u but struct %s "                                \
-                "is %zu bytes\n",                                                                  \
-                #name, (unsigned int)_IOC_SIZE(name), #type, sizeof(struct type));                 \
+    if (_IOC_SIZE(name) != sizeof(type)) {                                                         \
+        fprintf(stderr, "gen_asm_consts: %s encodes size %u but %s is %zu bytes\n", #name,         \
+                (unsigned int)_IOC_SIZE(name), #type, sizeof(type));                               \
         failed = 1;                                                                                \
     }
 
@@ -67,6 +67,8 @@ int main(void) {
     OFF("_IOCTL_PIVOT", ioctl_pivot_params, new_stack_address, "NEW_STACK");
     OFF("_IOCTL_PIVOT", ioctl_pivot_params, rsp, "RSP");
     OFF("_IOCTL_PIVOT", ioctl_pivot_params, delta, "DELTA");
+    OFF("_IOCTL_PIVOT", ioctl_pivot_params, old_start, "OLD_START");
+    OFF("_IOCTL_PIVOT", ioctl_pivot_params, old_len, "OLD_LEN");
     puts("");
 
     puts("#endif");
