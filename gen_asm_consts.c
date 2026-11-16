@@ -1,34 +1,24 @@
 // SPDX-License-Identifier: GPL-2.0
 //
-// Emits the ioctl request numbers and the layout of every ioctl parameter
-// struct as preprocessor macros, so that assembly sources never hard-code
-// them.
+// Emits the ioctl request numbers as preprocessor macros, so that assembly sources never
+// hard-code them.
 //
-// It also checks that the size encoded in each request number matches the
-// struct actually exchanged with the kernel: on mismatch it prints an error
-// and exits with a non-zero status, so the build stops.
+// It also checks that the size encoded in each request number matches the type actually
+// exchanged with the kernel: on mismatch it prints an error and exits with a non-zero
+// status, so the build stops.
 //
 // Usage: gen_asm_consts > asm_consts.h
 #include "uapi.h"
 
-#include <stddef.h>
 #include <stdio.h>
 
-/* request number, struct exchanged with the kernel */
+/* request number, type exchanged with the kernel */
 #define IOCTLS(X)                                                                                  \
-    X(IOCTL_SHADOW_PIVOT, struct ioctl_pivot_params)                                               \
+    X(IOCTL_SHADOW_PIVOT, struct ioctl_pivot)                                                      \
+    X(IOCTL_SHADOW_GET_LAYOUT, struct ioctl_layout)                                                \
     X(IOCTL_SHADOW_GET_OFFSET, __u64)
 
-#define ALIGN_UP(x, a) (((x) + (a) - 1) & ~((size_t)(a) - 1))
-
 static int failed;
-
-static void def(const char *prefix, const char *name, size_t value) {
-    char buf[64];
-
-    snprintf(buf, sizeof(buf), "%s_%s", prefix, name);
-    printf("#define %-32s %zu\n", buf, value);
-}
 
 #define PRINT_IOCTL(name, type) printf("#define %-32s 0x%08x\n", #name, (unsigned int)(name));
 
@@ -38,13 +28,6 @@ static void def(const char *prefix, const char *name, size_t value) {
                 (unsigned int)_IOC_SIZE(name), #type, sizeof(type));                               \
         failed = 1;                                                                                \
     }
-
-/* size, stack space keeping %rsp 16-byte aligned, and field offsets */
-#define LAYOUT(prefix, type)                                                                       \
-    def(prefix, "SIZE", sizeof(struct type));                                                      \
-    def(prefix, "FRAME", ALIGN_UP(sizeof(struct type), 16))
-
-#define OFF(prefix, type, field, name) def(prefix, name, offsetof(struct type, field))
 
 int main(void) {
     IOCTLS(CHECK_IOCTL)
@@ -56,21 +39,9 @@ int main(void) {
     puts("#ifndef SS_ASM_CONSTS_H");
     puts("#define SS_ASM_CONSTS_H");
     puts("");
-
     puts("/* ioctl request numbers */");
     IOCTLS(PRINT_IOCTL)
     puts("");
-
-    puts("/* struct ioctl_pivot_params */");
-    LAYOUT("_IOCTL_PIVOT", ioctl_pivot_params);
-    OFF("_IOCTL_PIVOT", ioctl_pivot_params, error, "ERROR");
-    OFF("_IOCTL_PIVOT", ioctl_pivot_params, new_stack_address, "NEW_STACK");
-    OFF("_IOCTL_PIVOT", ioctl_pivot_params, rsp, "RSP");
-    OFF("_IOCTL_PIVOT", ioctl_pivot_params, delta, "DELTA");
-    OFF("_IOCTL_PIVOT", ioctl_pivot_params, old_start, "OLD_START");
-    OFF("_IOCTL_PIVOT", ioctl_pivot_params, old_len, "OLD_LEN");
-    puts("");
-
     puts("#endif");
     return ferror(stdout) ? 1 : 0;
 }

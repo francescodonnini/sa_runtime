@@ -56,6 +56,33 @@
   {
     "arguments": [
       "/usr/bin/cc",
+      "-std=gnu17",
+      "-g",
+      "-O2",
+      "-fPIC",
+      "-Wall",
+      "-Wextra",
+      "-Wpedantic",
+      "-Wshadow",
+      "-Wformat=2",
+      "-Wstrict-prototypes",
+      "-Wmissing-prototypes",
+      "-Wvla",
+      "-Werror=implicit-function-declaration",
+      "-D_GNU_SOURCE",
+      "-I/home/francesco/Documents/Università/TESI/repositories/module/include",
+      "-c",
+      "-o",
+      "build/pt_interpreter.o",
+      "pt_interpreter.c"
+    ],
+    "directory": "/home/francesco/Documents/Università/TESI/repositories/runtime",
+    "file": "/home/francesco/Documents/Università/TESI/repositories/runtime/pt_interpreter.c",
+    "output": "/home/francesco/Documents/Università/TESI/repositories/runtime/build/pt_interpreter.o"
+  },
+  {
+    "arguments": [
+      "/usr/bin/cc",
       "-c",
       "-std=gnu17",
       "-Wall",

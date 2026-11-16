@@ -4,6 +4,8 @@
 #include <fcntl.h>
 
 #include <sys/mman.h>
+#include <sys/personality.h>
+#include <sys/resource.h>
 
 #include <asm/unistd.h>
 
@@ -123,8 +125,6 @@ static void set_at_base(unsigned long *sp, unsigned long base) {
     }
 }
 
-#define STACK_SIZE      0x800000UL
-#define ADR_HINT        0x100000000000UL
 #define max_ulong(a, b) ((a) > (b) ? (a) : (b))
 
 static inline unsigned long string_end(const char *s) {
@@ -140,6 +140,49 @@ static inline int is_stack_aux(unsigned long t) {
 
 static inline void copy(void *d, const void *s, unsigned long n) {
     asm volatile("rep movsb" : "+D"(d), "+S"(s), "+c"(n) : : "memory");
+}
+
+#define STACK_DEFAULT (8UL << 20)
+#define STACK_MAX     (1UL << 30)
+
+static unsigned long main_stack_size(unsigned long len) {
+    unsigned long rl[2];
+    unsigned long size = STACK_DEFAULT;
+    if (!sc4(__NR_prlimit64, 0, RLIMIT_STACK, 0, (long)rl) && rl[0] != RLIM_INFINITY) {
+        size = rl[0] < STACK_MAX ? rl[0] : STACK_MAX;
+    }
+    if (size < 4 * len) {
+        size = 4 * len;
+    }
+    return UP(size);
+}
+
+static int wants_exec_stack(Elf64_auxv_t *auxv) {
+    const Elf64_Phdr *phdr = 0;
+    unsigned long phnum = 0;
+    for (Elf64_auxv_t *a = auxv; a->a_type != AT_NULL; ++a) {
+        if (a->a_type == AT_PHDR) {
+            phdr = (const Elf64_Phdr *)a->a_un.a_val;
+        } else if (a->a_type == AT_PHNUM) {
+            phnum = a->a_un.a_val;
+        }
+    }
+
+    if (sc1(__NR_personality, 0xffffffff) & READ_IMPLIES_EXEC) {
+        return 1;
+    }
+
+    if (!phdr) {
+        return 0;
+    }
+
+    for (unsigned long i = 0; phdr && i < phnum; ++i) {
+        if (phdr[i].p_type == PT_GNU_STACK) {
+            return (phdr[i].p_flags & PF_X) != 0;
+        }
+    }
+
+    return 0;
 }
 
 /// Indirizzo di memoria più alto (inizio dello stack)
@@ -196,22 +239,24 @@ static unsigned long *move_stack(unsigned long *sp) {
     }
 
     unsigned long len = top - (unsigned long)sp;
-    if (len > STACK_SIZE / 2) {
-        DIE("shadowstack: initial stack too large");
-    }
+    unsigned long size = main_stack_size(len);
 
     long fd = sc2(__NR_open, (long)"/dev/shdwstck", O_RDWR | O_CLOEXEC);
     if (fd < 0) {
         DIE("shdwstck: cannot open /dev/shdwstck (is the module loaded?)");
     }
 
-    long area = sc6(__NR_mmap, ADR_HINT, STACK_SIZE, PROT_READ | PROT_WRITE,
-                    MAP_PRIVATE | MAP_FIXED_NOREPLACE, fd, 0);
+    int prot = PROT_READ | PROT_WRITE;
+    if (wants_exec_stack(auxv)) {
+        prot |= PROT_EXEC;
+    }
+
+    long area = sc6(__NR_mmap, 0, size, prot, MAP_PRIVATE, fd, 0);
     if (BAD(area)) {
         DIE("shadowstack: cannot map the main thread stack");
     }
 
-    unsigned long *nsp = (unsigned long *)((area + STACK_SIZE - len) & -16UL);
+    unsigned long *nsp = (unsigned long *)((area + size - len) & -16UL);
     copy(nsp, sp, len);
     long delta = (long)nsp - (long)sp;
     char **p = (char **)(nsp + 1);
@@ -229,7 +274,7 @@ static unsigned long *move_stack(unsigned long *sp) {
         }
     }
 
-    struct ioctl_pivot_params pv = {
+    struct ioctl_pivot pv = {
         .new_stack_address = (unsigned long)nsp,
         .rsp = (unsigned long)sp,
         .delta = 0,

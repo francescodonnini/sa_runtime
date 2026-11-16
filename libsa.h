@@ -5,29 +5,18 @@
 
 #include <sys/ioctl.h>
 
-void *freelist_pop(void);
+void *sa_alloc_user_stack(size_t len, int prot);
 
-void freelist_push(void *stack);
+long sa_init(void);
 
-long sa_alloc_shadow_stack(void *stack_base, bool detached);
+void sa_main_stack(void **base, size_t *size);
 
-void *sa_alloc_user_stack(void);
-
-long sa_init(unsigned long start, unsigned long end, unsigned long size);
-
-long sa_claim(unsigned long stack_base);
-
-long sa_free_kernel_stack(void *stack_base);
-
-long sa_mark_detached(void *stack_base);
+bool sa_owns(const void *p);
 
 bool sa_ready(void);
 
-long sa_reclaim(void *stack_base);
+void sa_release_user_stack(void *base, size_t len);
 
-void sa_release_user_stack(void *stack);
+void *sa_sys_mmap(void *addr, size_t len, int prot, int flags, int fd, off_t off);
 
-void sa_reset_after_fork(bool (*keep)(void *slot, void *ctx), void *cur_fork);
-
-bool sa_refresh_stack(void *alt_slot);
 #endif
