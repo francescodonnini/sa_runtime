@@ -216,7 +216,7 @@ int pthread_create(pthread_t *thread, const pthread_attr_t *user_attr,
     size_t size;
     pthread_attr_getstacksize(&attr, &size);
     int err = EAGAIN;
-    void *stack_base = sa_alloc_user_stack(size, PROT_READ | PROT_WRITE);
+    void *stack_base = sa_alloc_user_stack(size, sa_stack_prot());
     if (!stack_base) {
         goto out;
     }
@@ -395,7 +395,7 @@ int sigaltstack(const stack_t *ss, stack_t *old_ss) {
 
     if (ss && !(ss->ss_flags & SS_DISABLE)) {
         size = (ss->ss_size + 4095) & ~(size_t)4095;
-        slot = sa_alloc_user_stack(size, PROT_READ | PROT_WRITE);
+        slot = sa_alloc_user_stack(size, sa_stack_prot());
         if (!slot) {
             errno = ENOMEM;
             return -1;

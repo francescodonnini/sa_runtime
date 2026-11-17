@@ -2,14 +2,18 @@
 
 #include "uapi.h"
 
+#include <elf.h>
 #include <errno.h>
+#include <link.h>
 #include <stdatomic.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <unistd.h>
 
+#include <sys/auxv.h>
 #include <sys/mman.h>
+#include <sys/personality.h>
 #include <sys/stat.h>
 #include <sys/syscall.h>
 
@@ -25,6 +29,22 @@ static atomic_int dev_fd = -1;
 static dev_t dev_rdev;
 static struct ioctl_layout layout;
 static atomic_bool ready;
+
+static int stack_prot = PROT_READ | PROT_WRITE;
+
+static int program_wants_exec_stack(void) {
+    if (personality(0xffffffff) & READ_IMPLIES_EXEC) {
+        return 1;
+    }
+    const ElfW(Phdr) *ph = (const ElfW(Phdr) *)getauxval(AT_PHDR);
+    unsigned long n = getauxval(AT_PHNUM);
+    for (unsigned long i = 0; ph && i < n; i++) {
+        if (ph[i].p_type == PT_GNU_STACK) {
+            return (ph[i].p_flags & PF_X) != 0;
+        }
+    }
+    return 0;
+}
 
 void *sa_sys_mmap(void *addr, size_t len, int prot, int flags, int fd, off_t off) {
     return (void *)syscall(SYS_mmap, addr, len, prot, flags, fd, off);
@@ -75,8 +95,9 @@ long sa_init(void) {
     int fd = open_device();
     struct stat st;
     if (fd < 0 || fstat(fd, &st) != 0) {
+        int e = errno;
         perror("cannot open shadowstack device");
-        return -errno;
+        return -e;
     }
 
     if (ioctl(fd, IOCTL_SHADOW_GET_LAYOUT, &layout) != 0) {
@@ -88,6 +109,10 @@ long sa_init(void) {
     if (!layout.main_start) {
         (void)fprintf(stderr, "shadowstack: no pivot (not started through the interpreter?)\n");
         return -ENOENT;
+    }
+
+    if (program_wants_exec_stack()) {
+        stack_prot |= PROT_EXEC;
     }
 
     dev_rdev = st.st_rdev;
@@ -118,6 +143,10 @@ void *sa_alloc_user_stack(size_t len, int prot) {
 
     void *p = sa_sys_mmap(NULL, len, prot, MAP_PRIVATE, fd, 0);
     return p == MAP_FAILED ? NULL : p;
+}
+
+int sa_stack_prot(void) {
+    return stack_prot;
 }
 
 void sa_release_user_stack(void *base, size_t len) {

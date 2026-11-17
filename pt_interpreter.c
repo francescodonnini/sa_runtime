@@ -176,7 +176,7 @@ static int wants_exec_stack(Elf64_auxv_t *auxv) {
         return 0;
     }
 
-    for (unsigned long i = 0; phdr && i < phnum; ++i) {
+    for (unsigned long i = 0; i < phnum; ++i) {
         if (phdr[i].p_type == PT_GNU_STACK) {
             return (phdr[i].p_flags & PF_X) != 0;
         }
